@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Video {
+  id          String   @id @default(cuid())
+  topic       String
+  videoUrl    String
+  views       Int      @default(0)
+  likes       Int      @default(0)
+  platform    String   // "youtube", "instagram", "both"
+  status      String   // "success", "failed", "pending"
+  createdAt   DateTime @default(now())
+}
+
+model Analytics {
+  id              String   @id @default(cuid())
+  totalViews      Int      @default(0)
+  totalRevenue    Float    @default(0.0)
+  engagementRate  Float    @default(0.0)
+  subscribersGained Int    @default(0)
+  lastUpdated     DateTime @default(now())
+}

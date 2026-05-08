@@ -1,0 +1,41 @@
+{
+  "name": "ai-social-media-automator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@prisma/client": "^7.8.0",
+    "axios": "^1.16.0",
+    "dotenv": "^17.4.2",
+    "fluent-ffmpeg": "^2.1.3",
+    "google-trends-api": "^4.9.2",
+    "google-tts-api": "^2.0.2",
+    "googleapis": "^171.4.0",
+    "lucide-react": "^1.14.0",
+    "next": "16.2.6",
+    "node-cron": "^4.2.1",
+    "openai": "^6.37.0",
+    "pm2": "^7.0.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-hot-toast": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "prisma": "^7.8.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}
