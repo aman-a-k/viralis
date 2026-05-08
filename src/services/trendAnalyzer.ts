@@ -1,11 +1,6 @@
-// @ts-ignore
+// @ts-expect-error google-trends-api has no official type definitions
 import googleTrends from 'google-trends-api';
-
-export interface TrendData {
-  topic: string;
-  score: number;
-  keywords: string[];
-}
+import { TrendData } from '../types';
 
 export class TrendAnalyzer {
   /**
@@ -33,8 +28,8 @@ export class TrendAnalyzer {
       const topicTitle = topTrend.title.query;
       
       // Extract related keywords/articles
-      const relatedQueries = topTrend.relatedQueries.map((q: any) => q.query);
-      const articleTitles = topTrend.articles.map((a: any) => a.title).slice(0, 3);
+      const relatedQueries = topTrend.relatedQueries.map((q: {query: string}) => q.query);
+      const articleTitles = topTrend.articles.map((a: {title: string}) => a.title).slice(0, 3);
       
       const keywords = [...new Set([...relatedQueries, ...articleTitles])].slice(0, 5) as string[];
       

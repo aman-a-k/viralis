@@ -1,24 +1,57 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { VideoData, DashboardStats, SettingsData } from '@/types';
 import { 
-  LayoutDashboard, 
-  Video, 
-  TrendingUp, 
-  Settings, 
-  Play,
-  CheckCircle,
-  Clock,
-  PlayCircle,
-  Camera,
-  BarChart3,
-  Loader2
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle
 } from 'lucide-react';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
+  const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
+  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData} | null>(null);
+
+  // Settings Forms
+  const [ytId, setYtId] = useState('');
+  const [igId, setIgId] = useState('');
+  const [openAi, setOpenAi] = useState('');
+  const [ytClientId, setYtClientId] = useState('');
+  const [ytClientSecret, setYtClientSecret] = useState('');
+  const [igAccessToken, setIgAccessToken] = useState('');
+
+  const fetchData = async () => {
+    try {
+      const res = await fetch('/api/data');
+      const json = await res.json();
+      if (json.success) {
+        setData(json.data);
+        setYtId(json.data.settings.youtubeId);
+        setIgId(json.data.settings.instagramId);
+        setOpenAi(json.data.settings.openAiKey);
+        setYtClientId(json.data.settings.youtubeClientId);
+        setYtClientSecret(json.data.settings.youtubeClientSecret);
+        setIgAccessToken(json.data.settings.instagramAccessToken);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    // Check for OAuth callback success
+    if (typeof window !== 'undefined' && window.location.search.includes('success=youtube_connected')) {
+        toast.success("YouTube Account successfully authorized via OAuth!", { id: 'oauth', duration: 5000 });
+        window.history.replaceState(null, '', '/');
+    }
+    return () => clearInterval(interval);
+  }, []);
 
   const handleForceRun = async () => {
     setIsRunning(true);
@@ -26,12 +59,13 @@ export default function Dashboard() {
     
     try {
       const res = await fetch('/api/trigger', { method: 'POST' });
-      const data = await res.json();
+      const responseData = await res.json();
       
-      if (data.success) {
-        toast.success('Workflow completed! Video generated & uploaded.', { id: 'workflow', duration: 5000 });
+      if (responseData.success) {
+        toast.success('Workflow successfully initiated. Check Recent Generations for live status!', { id: 'workflow', duration: 5000 });
+        fetchData(); 
       } else {
-        toast.error('Workflow failed. Check logs.', { id: 'workflow', duration: 5000 });
+        toast.error('Workflow failed to start. Check logs.', { id: 'workflow', duration: 5000 });
       }
     } catch (err) {
       toast.error('Network error triggering workflow.', { id: 'workflow' });
@@ -39,6 +73,48 @@ export default function Dashboard() {
       setIsRunning(false);
     }
   };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    toast.loading('Saving settings...', { id: 'settings' });
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            youtubeId: ytId, 
+            instagramId: igId, 
+            openAiKey: openAi,
+            youtubeClientId: ytClientId,
+            youtubeClientSecret: ytClientSecret,
+            instagramAccessToken: igAccessToken
+        })
+      });
+      const responseData = await res.json();
+      if (responseData.success) {
+        toast.success("Settings saved successfully!", { id: 'settings' });
+        fetchData();
+      } else {
+        toast.error("Failed to save settings.", { id: 'settings' });
+      }
+    } catch (err) {
+      toast.error("Error saving settings.", { id: 'settings' });
+    }
+  };
+
+  const handleYoutubeLogin = () => {
+    if (!ytClientId || !ytClientSecret) {
+        toast.error("You must save your Client ID and Client Secret first!");
+        return;
+    }
+    window.location.href = '/api/auth/youtube';
+  };
+
+  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--background)' }}><Loader2 className="animate-spin" size={48} color="var(--primary)" /></div>;
+
+  const { videos, stats, settings } = data || { videos: [], stats: {}, settings: {} };
+  const successRate = stats.totalGenerated > 0 ? Math.round((stats.successCount / stats.totalGenerated) * 100) : 0;
 
   return (
     <div className="dashboard-layout">
@@ -67,7 +143,7 @@ export default function Dashboard() {
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 10px var(--success)' }}></div>
             <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>System Status</span>
           </div>
-          <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Daemon PM2 process running.</p>
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Daemon & Auto-Healer Active</p>
         </div>
       </aside>
 
@@ -79,10 +155,10 @@ export default function Dashboard() {
               {activeTab.replace('-', ' ')}
             </h1>
             <p style={{ color: '#94a3b8' }}>
-              {activeTab === 'overview' && "Welcome back. Here's your automation status."}
+              {activeTab === 'overview' && "Welcome back. Here's your real-time automation status."}
               {activeTab === 'content' && "View your previously generated and uploaded videos."}
               {activeTab === 'analytics' && "Track your revenue and overall channel growth."}
-              {activeTab === 'settings' && "Manage your API keys and daemon configuration."}
+              {activeTab === 'settings' && "Manage your API keys, OAuth logins, and daemon configuration."}
             </p>
           </div>
           
@@ -109,54 +185,54 @@ export default function Dashboard() {
               
               <div className="glass-card">
                 <div className="flex-between" style={{ marginBottom: '1rem' }}>
-                  <h3 style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Videos Generated (30d)</h3>
+                  <h3 style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Videos Generated (All Time)</h3>
                   <Video size={20} color="var(--secondary)" />
                 </div>
-                <p style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>30 / 30</p>
-                <span className="badge badge-primary">100% Success Rate</span>
+                <p style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>{stats.successCount} / {stats.totalGenerated}</p>
+                {stats.totalGenerated === 0 ? (
+                   <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>No videos generated yet</span>
+                ) : (
+                   <span className={`badge ${successRate >= 90 ? 'badge-primary' : successRate >= 50 ? 'badge-warning' : 'badge-danger'}`}>
+                     {successRate}% Success Rate
+                   </span>
+                )}
               </div>
 
               <div className="glass-card">
                 <div className="flex-between" style={{ marginBottom: '1rem' }}>
-                  <h3 style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Est. Monthly Revenue</h3>
+                  <h3 style={{ color: '#94a3b8', fontSize: '0.875rem' }}>Est. Total Revenue</h3>
                   <BarChart3 size={20} color="var(--success)" />
                 </div>
-                <p style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>$4,250.00</p>
-                <span className="badge badge-success">Passive Income Generated</span>
+                <p style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>${stats.revenue.toFixed(2)}</p>
+                <span className="badge badge-success">Real DB Values</span>
               </div>
             </section>
 
             {/* Recent Activity */}
             <section className="glass-panel" style={{ padding: '2rem' }}>
-              <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Live Workflow Pipeline</h2>
+              <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Recent Generations</h2>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.5rem' }}>
-                  <CheckCircle size={24} color="var(--success)" />
-                  <div style={{ flex: 1 }}>
-                    <h4 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Trend Analysis & Script Generation</h4>
-                    <p style={{ fontSize: '0.875rem', color: '#94a3b8' }}>Fetched real Google Trend and generated script via OpenAI.</p>
-                  </div>
-                </div>
-
-                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.5rem' }}>
-                  <CheckCircle size={24} color="var(--success)" />
-                  <div style={{ flex: 1 }}>
-                    <h4 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Video Rendering</h4>
-                    <p style={{ fontSize: '0.875rem', color: '#94a3b8' }}>Rendered .mp4 via internal FFMPEG & Google TTS engine.</p>
-                  </div>
-                </div>
-
-                <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.5rem', borderLeft: '3px solid var(--primary)' }}>
-                  <Clock size={24} color="var(--primary)" />
-                  <div style={{ flex: 1 }}>
-                    <h4 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Publishing</h4>
-                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                      <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,0,0,0.1)', color: '#ff0000', border: '1px solid rgba(255,0,0,0.2)' }}><PlayCircle size={14}/> YouTube API</span>
-                      <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(225,48,108,0.1)', color: '#e1306c', border: '1px solid rgba(225,48,108,0.2)' }}><Camera size={14}/> Instagram Graph API</span>
+                {videos.length === 0 ? (
+                  <p style={{ color: '#94a3b8' }}>No automation cycles run yet. Click &quot;Force Run Now&quot; to start.</p>
+                ) : (
+                  videos.slice(0, 3).map((v: VideoData) => (
+                    <div key={v.id} className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem 1.5rem' }}>
+                      {v.status === 'success' && <CheckCircle size={24} color="var(--success)" />}
+                      {v.status === 'pending' && <Clock size={24} color="var(--warning)" />}
+                      {v.status === 'failed' && <XCircle size={24} color="var(--danger)" />}
+                      
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ fontWeight: 600, marginBottom: '0.25rem' }}>{v.topic}</h4>
+                        <p style={{ fontSize: '0.875rem', color: '#94a3b8' }}>
+                          {v.status === 'success' ? 'Generated and uploaded successfully.' : 
+                           v.status === 'failed' ? 'Failed to upload. Auto-healer will retry.' : 'Currently processing...'}
+                        </p>
+                      </div>
+                      <span style={{ fontSize: '0.875rem', color: '#94a3b8' }}>{new Date(v.createdAt).toLocaleDateString()}</span>
                     </div>
-                  </div>
-                </div>
+                  ))
+                )}
               </div>
             </section>
           </div>
@@ -164,101 +240,118 @@ export default function Dashboard() {
 
         {activeTab === 'content' && (
           <div className="glass-panel animate-fade-in" style={{ padding: '2rem' }}>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Generated Videos</h2>
-            <p style={{ color: '#94a3b8', marginBottom: '1rem' }}>When the daemon generates videos, they will appear here.</p>
-            <div className="grid-cols-3">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-                  <div style={{ height: '150px', background: '#2d313a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <PlayCircle size={32} color="#94a3b8" />
+            <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Generated Videos Database</h2>
+            <p style={{ color: '#94a3b8', marginBottom: '1rem' }}>All genuine content generated by the AI Daemon.</p>
+            {videos.length === 0 ? (
+              <p style={{ color: '#94a3b8', padding: '2rem', textAlign: 'center', border: '1px dashed var(--surface-border)', borderRadius: '8px' }}>
+                No videos exist in the database yet.
+              </p>
+            ) : (
+              <div className="grid-cols-3">
+                {videos.map((v: VideoData) => (
+                  <div key={v.id} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ height: '150px', background: '#2d313a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <PlayCircle size={32} color={v.status === 'success' ? '#10b981' : '#94a3b8'} />
+                    </div>
+                    <div style={{ padding: '1rem' }}>
+                      <h4 style={{ fontSize: '1rem', marginBottom: '0.25rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.topic}</h4>
+                      <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{new Date(v.createdAt).toLocaleDateString()} • {v.status}</p>
+                    </div>
                   </div>
-                  <div style={{ padding: '1rem' }}>
-                    <h4 style={{ fontSize: '1rem', marginBottom: '0.25rem' }}>Viral Topic #{i}</h4>
-                    <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Uploaded 2 days ago</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'analytics' && (
           <div className="glass-panel animate-fade-in" style={{ padding: '2rem' }}>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>30-Day Channel Analytics</h2>
+            <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Channel Analytics</h2>
             <div className="grid-cols-3" style={{ marginBottom: '2rem' }}>
               <div className="glass-card" style={{ borderLeft: '3px solid var(--primary)' }}>
                 <h4 style={{ fontSize: '0.875rem', color: '#94a3b8' }}>Total Views</h4>
-                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>1.2M</p>
+                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats.views}</p>
               </div>
               <div className="glass-card" style={{ borderLeft: '3px solid var(--success)' }}>
                 <h4 style={{ fontSize: '0.875rem', color: '#94a3b8' }}>Engagement Rate</h4>
-                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>8.4%</p>
+                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats.engagement}%</p>
               </div>
               <div className="glass-card" style={{ borderLeft: '3px solid var(--secondary)' }}>
                 <h4 style={{ fontSize: '0.875rem', color: '#94a3b8' }}>New Subscribers</h4>
-                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>+4,200</p>
+                <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>+{stats.subs}</p>
               </div>
             </div>
-            <p style={{ color: '#94a3b8' }}>The system checks these metrics automatically to adjust the OpenAI prompt for better engagement.</p>
+            <p style={{ color: '#94a3b8' }}>The system checks these real database metrics automatically to adjust the OpenAI prompt.</p>
           </div>
         )}
 
         {activeTab === 'settings' && (
           <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            
-            {/* Account Connections */}
             <section className="glass-panel" style={{ padding: '2rem' }}>
               <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Settings size={20} /> Connect Social Accounts
+                <Settings size={20} /> Platform Connections & OAuth
               </h2>
-              <p style={{ color: '#94a3b8', marginBottom: '2rem' }}>Link your destination channels for automated publishing.</p>
+              <p style={{ color: '#94a3b8', marginBottom: '2rem' }}>Configure your GCP and Meta developer tokens to grant the daemon upload permissions.</p>
               
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-                {/* YouTube */}
-                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '4px solid #ff0000' }}>
-                  <div className="flex-between">
-                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
-                      <PlayCircle size={20} color="#ff0000" /> YouTube Channel
-                    </h3>
-                    <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>Not Connected</span>
+              <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                  
+                  {/* YouTube OAuth Configuration */}
+                  <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '4px solid #ff0000' }}>
+                    <div className="flex-between">
+                      <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+                        <PlayCircle size={20} color="#ff0000" /> YouTube OAuth
+                      </h3>
+                      <span className="badge" style={{ background: settings.hasYoutubeAuth ? 'rgba(16,185,129,0.1)' : 'rgba(255,0,0,0.1)', color: settings.hasYoutubeAuth ? 'var(--success)' : '#ff0000' }}>
+                        {settings.hasYoutubeAuth ? 'Authorized ✅' : 'Not Authorized ❌'}
+                      </span>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '1rem' }}>Enter your Google Cloud Platform credentials, save them, then click Login to grant upload permissions.</p>
+                      
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>GCP Client ID</label>
+                      <input type="text" value={ytClientId} onChange={(e) => setYtClientId(e.target.value)} placeholder="...apps.googleusercontent.com" className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
+                      
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>GCP Client Secret</label>
+                      <input type="password" value={ytClientSecret} onChange={(e) => setYtClientSecret(e.target.value)} placeholder="GOCSPX-..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
+                      
+                      <button type="button" className="btn btn-outline" style={{ width: '100%', borderColor: '#ff0000', color: '#ff0000', marginTop: '0.5rem' }} onClick={handleYoutubeLogin}>
+                        Login with Google
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>Channel ID</label>
-                    <input type="text" placeholder="UC..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
-                    <button className="btn btn-outline" style={{ width: '100%', borderColor: '#ff0000', color: '#ff0000' }} onClick={() => toast.success('YouTube Channel Linked!')}>
-                      Connect via OAuth
-                    </button>
+
+                  {/* Instagram Graph API */}
+                  <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '4px solid #e1306c' }}>
+                    <div className="flex-between">
+                      <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+                        <Camera size={20} color="#e1306c" /> Instagram Graph API
+                      </h3>
+                      <span className="badge" style={{ background: settings.instagramAccessToken ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.1)', color: settings.instagramAccessToken ? 'var(--success)' : 'inherit' }}>
+                        {settings.instagramAccessToken ? 'Connected' : 'Not Connected'}
+                      </span>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '1rem' }}>Generate a long-lived Page Access Token from the Meta Developer Graph API Explorer.</p>
+                      
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>Instagram Account ID</label>
+                      <input type="text" value={igId} onChange={(e) => setIgId(e.target.value)} placeholder="178414..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
+                      
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>Page Access Token</label>
+                      <input type="password" value={igAccessToken} onChange={(e) => setIgAccessToken(e.target.value)} placeholder="EAA..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
+                    </div>
                   </div>
                 </div>
 
-                {/* Instagram */}
-                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '4px solid #e1306c' }}>
-                  <div className="flex-between">
-                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
-                      <Camera size={20} color="#e1306c" /> Instagram Profile
-                    </h3>
-                    <span className="badge" style={{ background: 'rgba(255,255,255,0.1)' }}>Not Connected</span>
-                  </div>
+                <div className="glass-card">
+                  <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>AI Engine Configuration</h3>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#94a3b8' }}>Instagram Username / ID</label>
-                    <input type="text" placeholder="@username" className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)', marginBottom: '1rem' }} />
-                    <button className="btn btn-outline" style={{ width: '100%', borderColor: '#e1306c', color: '#e1306c' }} onClick={() => toast.success('Instagram Profile Linked!')}>
-                      Connect via Graph API
-                    </button>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>OpenAI API Key (Required for Scripts)</label>
+                    <input type="password" value={openAi} onChange={(e) => setOpenAi(e.target.value)} placeholder="sk-..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)' }} />
                   </div>
                 </div>
-              </div>
-            </section>
 
-            {/* AI API Keys */}
-            <section className="glass-panel" style={{ padding: '2rem' }}>
-              <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>AI Engine Configuration</h2>
-              <form style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px' }} onSubmit={(e) => { e.preventDefault(); toast.success("AI Configuration saved locally!"); }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>OpenAI API Key (Required for Scripts)</label>
-                  <input type="password" placeholder="sk-..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)' }} />
-                </div>
-                <button type="submit" className="btn btn-primary" style={{ width: 'fit-content' }}>Save Configuration</button>
+                <button type="submit" className="btn btn-primary" style={{ width: 'fit-content' }}>Save All Configuration</button>
               </form>
             </section>
           </div>

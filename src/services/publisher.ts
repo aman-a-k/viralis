@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import fs from 'fs';
+import { prisma } from '../lib/prisma';
 
 export class Publisher {
   /**
@@ -8,12 +9,12 @@ export class Publisher {
   static async publishVideo(videoPath: string, title: string, description: string): Promise<boolean> {
     console.log(`[Publisher] Preparing to upload video: ${title}`);
     
-    const ytKey = process.env.YOUTUBE_API_KEY;
-    const igKey = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+    const ytKey = settings?.youtubeId || process.env.YOUTUBE_API_KEY;
+    const igKey = settings?.instagramId || process.env.INSTAGRAM_ACCESS_TOKEN;
     
     if (!ytKey && !igKey) {
-      console.warn("[Publisher] Missing API keys. Running in Simulation Mode.");
-      return this.simulatePublish();
+      throw new Error("No destination configured. Please configure YouTube or Instagram in the Settings dashboard.");
     }
 
     try {
@@ -36,21 +37,19 @@ export class Publisher {
 
   private static async publishToYouTube(videoPath: string, title: string, description: string) {
       console.log("[Publisher] Authenticating with YouTube API...");
-      // NOTE: For a real automated worker, you need OAuth2 refresh tokens, not just an API key.
-      // Assuming OAuth2Client is set up with access & refresh tokens in env:
       
+      const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+      
+      if (!settings?.youtubeClientId || !settings?.youtubeClientSecret || !settings?.youtubeRefreshToken) {
+        throw new Error("Missing complete YouTube OAuth credentials in Database.");
+      }
+
       const oauth2Client = new google.auth.OAuth2(
-        process.env.YOUTUBE_CLIENT_ID,
-        process.env.YOUTUBE_CLIENT_SECRET,
-        process.env.YOUTUBE_REDIRECT_URI
+        settings.youtubeClientId,
+        settings.youtubeClientSecret
       );
 
-      if (process.env.YOUTUBE_REFRESH_TOKEN) {
-        oauth2Client.setCredentials({ refresh_token: process.env.YOUTUBE_REFRESH_TOKEN });
-      } else {
-        console.warn("[Publisher] YOUTUBE_REFRESH_TOKEN is missing. Cannot upload to YouTube.");
-        return;
-      }
+      oauth2Client.setCredentials({ refresh_token: settings.youtubeRefreshToken });
 
       const youtube = google.youtube({
         version: 'v3',
@@ -81,18 +80,7 @@ export class Publisher {
         });
         console.log(`[Publisher] YouTube Upload Successful. Video ID: ${res.data.id}`);
       } else {
-         console.log(`[Publisher] File ${videoPath} not found. Simulating YouTube upload success.`);
+         throw new Error(`File ${videoPath} not found. Cannot upload to YouTube.`);
       }
-  }
-
-  private static async simulatePublish(): Promise<boolean> {
-      console.log("[Publisher] Uploading to YouTube Shorts...");
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log("[Publisher] YouTube Upload Successful.");
-
-      console.log("[Publisher] Uploading to Instagram Reels...");
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log("[Publisher] Instagram Upload Successful.");
-      return true;
   }
 }

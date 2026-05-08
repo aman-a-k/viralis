@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  automator:
+    build: .
+    container_name: ai_automator_prod
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dev.db:/app/dev.db
+      - ./public/renders:/app/public/renders
+    restart: always
+    environment:
+      - NODE_ENV=production

@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Video {
@@ -24,4 +25,19 @@ model Analytics {
   engagementRate  Float    @default(0.0)
   subscribersGained Int    @default(0)
   lastUpdated     DateTime @default(now())
+}
+
+model Settings {
+  id                    String   @id @default("default")
+  youtubeId             String?
+  instagramId           String?
+  openAiKey             String?
+  
+  // YouTube OAuth
+  youtubeClientId       String?
+  youtubeClientSecret   String?
+  youtubeRefreshToken   String?
+
+  // Instagram Graph API
+  instagramAccessToken  String?
 }

@@ -1,3 +1,5 @@
+import { prisma } from '../lib/prisma';
+
 export class AnalyticsService {
   /**
    * After 30 days, verifies the analytics to ensure high-quality content 
@@ -6,17 +8,23 @@ export class AnalyticsService {
   static async verify30DayPerformance(): Promise<void> {
     console.log("[AnalyticsService] Verifying 30-Day Performance...");
     
-    // Simulate fetching views and likes from Youtube/Instagram
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+    if (!settings || !settings.youtubeId) {
+      console.log("[AnalyticsService] No YouTube ID configured. Cannot fetch real analytics.");
+      return;
+    }
+
+    // In a real scenario, we would use google.youtube.channels.list to fetch actual stats for settings.youtubeId.
+    // For now, without OAuth implementation in the analytics service, we will pull from our own database.
+    const videos = await prisma.video.findMany({ where: { status: 'success' } });
     
-    const totalViews = Math.floor(Math.random() * 50000) + 10000;
-    const engagementRate = (Math.random() * 5 + 5).toFixed(2); // 5% - 10%
+    const totalViews = videos.reduce((acc, v) => acc + v.views, 0);
+    const engagementRate = totalViews > 0 ? (videos.reduce((acc, v) => acc + v.likes, 0) / totalViews) * 100 : 0;
     
-    console.log(`[AnalyticsService] Past 30 Days Stats: ${totalViews} Views | ${engagementRate}% Engagement.`);
+    console.log(`[AnalyticsService] Past 30 Days Stats: ${totalViews} Views | ${engagementRate.toFixed(2)}% Engagement.`);
     
-    if (parseFloat(engagementRate) < 7.0) {
+    if (engagementRate < 7.0 && totalViews > 1000) {
       console.log("[AnalyticsService] Engagement below threshold. Adjusting content strategy for next 30 days...");
-      // Logic to mutate system prompts for more viral hooks
     } else {
       console.log("[AnalyticsService] Performance is GOOD. Continuing current strategy for next 30 days.");
     }
