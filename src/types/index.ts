@@ -4,10 +4,17 @@ export interface TrendData {
   keywords: string[];
 }
 
+export interface Scene {
+  spokenText: string;
+  bRollPrompt: string;
+  durationEstimate?: number;
+}
+
 export interface GeneratedContent {
   script: string;
   captions: { startTime: number; endTime: number; text: string }[];
   visualPrompts: string[];
+  scenes?: Scene[]; // Pro structure
 }
 
 export interface SettingsData {

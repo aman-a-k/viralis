@@ -28,13 +28,21 @@ export class ContentGenerator {
       
       You must return ONLY a raw JSON object (without markdown wrappers or codeblocks) with the following structure:
       {
-        "script": "The full voiceover script.",
-        "visualPrompts": ["Prompt 1 for 4K AI video generator", "Prompt 2", "Prompt 3"],
+        "script": "The full voiceover script seamlessly connected.",
+        "visualPrompts": ["Prompt 1", "Prompt 2"],
         "captions": [
-          { "startTime": 0, "endTime": 2.5, "text": "Exact text matching script part 1" },
-          { "startTime": 2.5, "endTime": 5.0, "text": "Exact text matching script part 2" }
+          { "startTime": 0, "endTime": 2.5, "text": "Exact text matching script part 1" }
+        ],
+        "scenes": [
+          {
+            "spokenText": "The exact sentence or phrase spoken in this scene.",
+            "bRollPrompt": "A highly detailed visual description to search for stock footage (e.g. '4k drone shot of mountain', 'hacker typing on glowing keyboard')",
+            "durationEstimate": 3.0
+          }
         ]
       }
+      
+      CRITICAL: The "scenes" array is the most important part. Break the script down into 5-10 distinct visual scenes. The sum of durationEstimate should be around 45-60 seconds.
       `;
 
       const response = await openai.chat.completions.create({

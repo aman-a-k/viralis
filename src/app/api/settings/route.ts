@@ -7,7 +7,7 @@ export async function POST(req: Request) {
     const { 
         youtubeId, instagramId, openAiKey, youtubeClientId, youtubeClientSecret, 
         instagramAccessToken, brandName, brandNiche, brandTone, targetAudience, 
-        discordWebhookUrl, pexelsApiKey 
+        discordWebhookUrl, pexelsApiKey, elevenLabsApiKey, pixabayApiKey, videoStyle, captionStyle 
     } = body;
 
     const settings = await prisma.settings.upsert({
@@ -24,7 +24,11 @@ export async function POST(req: Request) {
         brandTone: brandTone || null,
         targetAudience: targetAudience || null,
         discordWebhookUrl: discordWebhookUrl || null,
-        pexelsApiKey: pexelsApiKey || null
+        pexelsApiKey: pexelsApiKey || null,
+        elevenLabsApiKey: elevenLabsApiKey || null,
+        pixabayApiKey: pixabayApiKey || null,
+        videoStyle: videoStyle || null,
+        captionStyle: captionStyle || null
       },
       create: {
         id: 'default',
