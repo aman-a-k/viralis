@@ -10,11 +10,22 @@ export class ContentAgent extends BaseAgent {
     this.log(`Crafting content for topic: ${trendData.topic}`);
     
     try {
-      // 1. Use the existing service to generate the base content
+      // 1. Fetch Brand Settings
+      const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+      const brandContext = `
+        Brand Name: ${settings?.brandName || 'Automator AI'}
+        Niche: ${settings?.brandNiche || 'General'}
+        Tone: ${settings?.brandTone || 'Professional'}
+        Target Audience: ${settings?.targetAudience || 'General Audience'}
+      `;
+
+      // 2. Use the existing service to generate the base content
       const baseContent = await ContentGenerator.generateVideoContent(trendData);
       
-      // 2. Use AI to polish and optimize for high retention
+      // 3. Use AI to polish and optimize for high retention
       const optimizationPrompt = `
+      Brand Context: ${brandContext}
+      
       I have a generated script and visual prompts for a video about "${trendData.topic}".
       
       Script: ${baseContent.script}

@@ -18,6 +18,17 @@ model Video {
   createdAt   DateTime @default(now())
 }
 
+model ApprovalQueue {
+  id              String   @id @default(cuid())
+  topic           String
+  script          String
+  visualPrompts   String   // JSON
+  captions        String   // JSON
+  status          String   @default("pending") // "pending", "approved", "rejected"
+  rejectionReason String?
+  createdAt       DateTime @default(now())
+}
+
 model Trend {
   id          String   @id @default(cuid())
   topic       String
@@ -50,6 +61,19 @@ model Settings {
 
   // Instagram Graph API
   instagramAccessToken  String?
+
+  // Brand Identity
+  brandName             String?   @default("Automator AI")
+  brandNiche            String?   @default("Technology & AI")
+  brandTone             String?   @default("Professional & Engaging")
+  targetAudience        String?   @default("General Tech Enthusiasts")
+  defaultHashtags       String?   @default("ai,tech,trending")
+  
+  // Notification Hooks
+  discordWebhookUrl     String?
+
+  // Visual Assets
+  pexelsApiKey          String?
 }
 
 // NextAuth Models
