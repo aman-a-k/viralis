@@ -32,6 +32,11 @@ export async function GET() {
       take: 20
     });
 
+    const approvalQueue = await prisma.approvalQueue.findMany({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'desc' }
+    });
+
     const agents = [
       {
         id: 'trend-agent',
@@ -82,7 +87,8 @@ export async function GET() {
           instagramAccessToken: settings.instagramAccessToken || ''
         },
         agents,
-        trends
+        trends,
+        approvalQueue
       }
     });
   } catch (error) {

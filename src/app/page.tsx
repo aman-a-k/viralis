@@ -4,10 +4,11 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { VideoData, DashboardStats, SettingsData } from '@/types';
 import { 
-  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle, Bot, Zap, History, LogOut, User as UserIcon
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle, Bot, Zap, History, LogOut, User as UserIcon, ClipboardCheck, Bell, Briefcase
 } from 'lucide-react';
 import { AgentStatusView } from '@/components/AgentStatusView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
+import { ApprovalQueueView } from '@/components/ApprovalQueueView';
 import { signIn, signOut, useSession } from 'next-auth/react';
 
 export default function Dashboard() {
@@ -15,7 +16,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
-  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData, agents: AgentStatus[], trends: any[]} | null>(null);
+  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData, agents: AgentStatus[], trends: any[], approvalQueue: any[]} | null>(null);
 
   // Settings Forms
   const [ytId, setYtId] = useState('');
@@ -24,6 +25,14 @@ export default function Dashboard() {
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSecret, setYtClientSecret] = useState('');
   const [igAccessToken, setIgAccessToken] = useState('');
+  
+  // Brand Settings
+  const [brandName, setBrandName] = useState('');
+  const [brandNiche, setBrandNiche] = useState('');
+  const [brandTone, setBrandTone] = useState('');
+  const [targetAudience, setTargetAudience] = useState('');
+  const [discordWebhook, setDiscordWebhook] = useState('');
+  const [pexelsKey, setPexelsKey] = useState('');
 
   const fetchData = async () => {
     try {
@@ -37,6 +46,12 @@ export default function Dashboard() {
         setYtClientId(json.data.settings.youtubeClientId);
         setYtClientSecret(json.data.settings.youtubeClientSecret);
         setIgAccessToken(json.data.settings.instagramAccessToken);
+        setBrandName(json.data.settings.brandName);
+        setBrandNiche(json.data.settings.brandNiche);
+        setBrandTone(json.data.settings.brandTone);
+        setTargetAudience(json.data.settings.targetAudience);
+        setDiscordWebhook(json.data.settings.discordWebhookUrl);
+        setPexelsKey(json.data.settings.pexelsApiKey);
       }
     } catch (e) {
       console.error(e);
@@ -92,7 +107,13 @@ export default function Dashboard() {
             openAiKey: openAi,
             youtubeClientId: ytClientId,
             youtubeClientSecret: ytClientSecret,
-            instagramAccessToken: igAccessToken
+            instagramAccessToken: igAccessToken,
+            brandName,
+            brandNiche,
+            brandTone,
+            targetAudience,
+            discordWebhookUrl: discordWebhook,
+            pexelsApiKey: pexelsKey
         })
       });
       const responseData = await res.json();
@@ -132,6 +153,13 @@ export default function Dashboard() {
             </button>
             <button className={`nav-item ${activeTab === 'content' ? 'active' : ''}`} onClick={() => setActiveTab('content')}>
               <Video size={20} /> Content Library
+            </button>
+            <button className={`nav-item ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
+              <div style={{ position: 'relative' }}>
+                <ClipboardCheck size={20} />
+                {(data?.approvalQueue?.length || 0) > 0 && <span style={{ position: 'absolute', top: -5, right: -5, width: 8, height: 8, background: 'var(--primary)', borderRadius: '50%' }}></span>}
+              </div> 
+              Approval Queue
             </button>
             <button className={`nav-item ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => setActiveTab('trends')}>
               <History size={20} /> Trend History
@@ -191,6 +219,7 @@ export default function Dashboard() {
             <p style={{ color: '#94a3b8' }}>
               {activeTab === 'overview' && "Welcome back. Here's your real-time automation status."}
               {activeTab === 'content' && "View your previously generated and uploaded videos."}
+              {activeTab === 'queue' && "Human-in-the-Loop review for AI generated content."}
               {activeTab === 'trends' && "History of viral topics identified by TrendIntelligence."}
               {activeTab === 'analytics' && "Track your revenue and overall channel growth."}
               {activeTab === 'settings' && "Manage your API keys, OAuth logins, and daemon configuration."}
@@ -306,6 +335,14 @@ export default function Dashboard() {
           </div>
         )}
 
+        {activeTab === 'queue' && (
+          <ApprovalQueueView items={data?.approvalQueue || []} onRefresh={fetchData} />
+        )}
+
+        {activeTab === 'trends' && (
+          <TrendHistoryView trends={data?.trends || []} />
+        )}
+
         {activeTab === 'analytics' && (
           <div className="glass-panel animate-fade-in" style={{ padding: '2rem' }}>
             <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Channel Analytics</h2>
@@ -325,6 +362,10 @@ export default function Dashboard() {
             </div>
             <p style={{ color: '#94a3b8' }}>The system checks these real database metrics automatically to adjust the OpenAI prompt.</p>
           </div>
+        )}
+
+        {activeTab === 'agents' && (
+          <AgentStatusView agents={data?.agents || []} />
         )}
 
         {activeTab === 'settings' && (
@@ -385,11 +426,51 @@ export default function Dashboard() {
                   </div>
                 </div>
 
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                  <div className="glass-card" style={{ borderTop: '4px solid var(--primary)' }}>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Briefcase size={18} /> Brand Identity
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Brand Name</label>
+                        <input type="text" value={brandName} onChange={(e) => setBrandName(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Niche / Industry</label>
+                        <input type="text" value={brandNiche} onChange={(e) => setBrandNiche(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Brand Tone</label>
+                        <input type="text" value={brandTone} onChange={(e) => setBrandTone(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Target Audience</label>
+                        <input type="text" value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card" style={{ borderTop: '4px solid var(--secondary)' }}>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Bell size={18} /> System Notifications
+                    </h3>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '1rem' }}>Receive real-time alerts on Discord when content is generated or published.</p>
+                      <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Discord Webhook URL</label>
+                      <input type="text" value={discordWebhook} onChange={(e) => setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="glass-card" style={{ width: '100%', padding: '0.6rem', marginBottom: '1rem' }} />
+                      
+                      <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Pexels API Key (for background visuals)</label>
+                      <input type="password" value={pexelsKey} onChange={(e) => setPexelsKey(e.target.value)} placeholder="API Key..." className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="glass-card">
                   <h3 style={{ fontSize: '1rem', marginBottom: '1rem' }}>AI Engine Configuration</h3>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>OpenAI API Key (Required for Scripts)</label>
-                    <input type="password" value={openAi} onChange={(e) => setOpenAi(e.target.value)} placeholder="sk-..." className="glass-card" style={{ width: '100%', padding: '0.75rem', color: 'white', border: '1px solid var(--surface-border)' }} />
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>OpenAI API Key (Required for Agents)</label>
+                    <input type="password" value={openAi} onChange={(e) => setOpenAi(e.target.value)} placeholder="sk-..." className="glass-card" style={{ width: '100%', padding: '0.75rem' }} />
                   </div>
                 </div>
 

@@ -2,6 +2,7 @@ import { TrendAgent } from './trendAgent';
 import { ContentAgent } from './contentAgent';
 import { VideoAgent } from './videoAgent';
 import { PublisherAgent } from './publisherAgent';
+import { prisma } from '../lib/prisma';
 
 export class Orchestrator {
   private trendAgent = new TrendAgent();
@@ -27,24 +28,25 @@ export class Orchestrator {
       const contentResult = await this.contentAgent.run(originalTrend);
       if (!contentResult.success) throw new Error(contentResult.message);
 
-      // 3. Produce Video
-      const videoResult = await this.videoAgent.run(contentResult.data);
-      if (!videoResult.success) throw new Error(videoResult.message);
-
-      // 4. Publish Content
-      const publishResult = await this.publisherAgent.run({
-        videoPath: videoResult.data.videoPath,
-        content: contentResult.data
+      // 3. Save to Approval Queue (Human-in-the-Loop)
+      this.log(`Sending content for "${originalTrend.topic}" to approval queue...`);
+      
+      await prisma.approvalQueue.create({
+        data: {
+          topic: originalTrend.topic,
+          script: contentResult.data.polished?.polishedScript || contentResult.data.original.script,
+          visualPrompts: JSON.stringify(contentResult.data.polished?.refinedVisualPrompts || contentResult.data.original.visualPrompts),
+          captions: JSON.stringify(contentResult.data.original.captions),
+          status: 'pending'
+        }
       });
 
-      if (publishResult.success) {
-        console.log('--- Workflow Completed Successfully ---');
-      } else {
-        console.error('--- Workflow Failed at Publishing ---');
-      }
+      console.log('--- Workflow Paused for Approval ---');
+      return { success: true, message: 'Content sent to approval queue.' };
 
     } catch (error: any) {
       console.error(`[Orchestrator] Fatal Error: ${error.message}`);
+      return { success: false, message: error.message };
     }
   }
 }
