@@ -72,8 +72,15 @@ model Settings {
   // Notification Hooks
   discordWebhookUrl     String?
 
-  // Visual Assets
+  // Visual Assets & Voice (Pro Tier)
   pexelsApiKey          String?
+  pixabayApiKey         String?
+  elevenLabsApiKey      String?
+
+  // Video Generation Preferences
+  videoStyle            String?   @default("Cinematic Stock") // "Cinematic Stock", "AI Art Transitions"
+  captionStyle          String?   @default("Dynamic Pop")     // "Dynamic Pop" (Hormozi style), "Minimalist"
+  backgroundMusic       String?   @default("Trending Beats")
 }
 
 // NextAuth Models

@@ -26,27 +26,34 @@ export class ContentAgent extends BaseAgent {
       const optimizationPrompt = `
       Brand Context: ${brandContext}
       
-      I have a generated script and visual prompts for a video about "${trendData.topic}".
+      I have a generated script and scenes for a video about "${trendData.topic}".
       
       Script: ${baseContent.script}
-      
-      Visual Prompts: ${JSON.stringify(baseContent.visualPrompts)}
+      Scenes: ${JSON.stringify(baseContent.scenes)}
       
       Optimize this script for high retention. Add a powerful hook at the beginning and a clear call to action at the end. 
       Ensure the tone matches a viral social media post.
+      You MUST return the polished content in JSON format, keeping the scene structure intact but improving the spokenText and bRollPrompts.
       
-      Return the polished content in JSON format:
       {
         "polishedScript": "string",
         "hook": "string",
         "cta": "string",
-        "refinedVisualPrompts": ["string"],
+        "refinedScenes": [
+          {
+            "spokenText": "string",
+            "bRollPrompt": "string",
+            "durationEstimate": number
+          }
+        ],
         "hashtags": ["string"]
       }
       `;
       
-      const aiResponse = await this.chat(optimizationPrompt);
-      const cleanedResponse = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+      const aiResponse = await this.chat(optimizationPrompt, "gpt-4o");
+      // Note: base class chat method now returns the message object directly because we updated it for tool calling
+      const responseText = aiResponse.content || "{}";
+      const cleanedResponse = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
       const polishedContent = JSON.parse(cleanedResponse);
       
       return {

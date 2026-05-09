@@ -33,6 +33,12 @@ export default function Dashboard() {
   const [targetAudience, setTargetAudience] = useState('');
   const [discordWebhook, setDiscordWebhook] = useState('');
   const [pexelsKey, setPexelsKey] = useState('');
+  
+  // Pro Video Settings
+  const [elevenLabsKey, setElevenLabsKey] = useState('');
+  const [pixabayKey, setPixabayKey] = useState('');
+  const [videoStyle, setVideoStyle] = useState('Cinematic Stock');
+  const [captionStyle, setCaptionStyle] = useState('Dynamic Pop');
 
   const fetchData = async () => {
     try {
@@ -51,7 +57,11 @@ export default function Dashboard() {
         setBrandTone(json.data.settings.brandTone);
         setTargetAudience(json.data.settings.targetAudience);
         setDiscordWebhook(json.data.settings.discordWebhookUrl);
-        setPexelsKey(json.data.settings.pexelsApiKey);
+        setPexelsKey(json.data.settings.pexelsApiKey || '');
+        setElevenLabsKey(json.data.settings.elevenLabsApiKey || '');
+        setPixabayKey(json.data.settings.pixabayApiKey || '');
+        setVideoStyle(json.data.settings.videoStyle || 'Cinematic Stock');
+        setCaptionStyle(json.data.settings.captionStyle || 'Dynamic Pop');
       }
     } catch (e) {
       console.error(e);
@@ -113,7 +123,11 @@ export default function Dashboard() {
             brandTone,
             targetAudience,
             discordWebhookUrl: discordWebhook,
-            pexelsApiKey: pexelsKey
+            pexelsApiKey: pexelsKey,
+            elevenLabsApiKey: elevenLabsKey,
+            pixabayApiKey: pixabayKey,
+            videoStyle,
+            captionStyle
         })
       });
       const responseData = await res.json();
@@ -459,9 +473,50 @@ export default function Dashboard() {
                       <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '1rem' }}>Receive real-time alerts on Discord when content is generated or published.</p>
                       <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Discord Webhook URL</label>
                       <input type="text" value={discordWebhook} onChange={(e) => setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="glass-card" style={{ width: '100%', padding: '0.6rem', marginBottom: '1rem' }} />
-                      
-                      <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Pexels API Key (for background visuals)</label>
-                      <input type="password" value={pexelsKey} onChange={(e) => setPexelsKey(e.target.value)} placeholder="API Key..." className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                  <div className="glass-card" style={{ borderTop: '4px solid var(--success)' }}>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Camera size={18} /> Pro Visual Assets
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Pexels API Key</label>
+                        <input type="password" value={pexelsKey} onChange={(e) => setPexelsKey(e.target.value)} placeholder="API Key..." className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Pixabay API Key (Alternative)</label>
+                        <input type="password" value={pixabayKey} onChange={(e) => setPixabayKey(e.target.value)} placeholder="API Key..." className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card" style={{ borderTop: '4px solid #8b5cf6' }}>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Video size={18} /> Video & Audio Style
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                       <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>ElevenLabs API Key (Hyper-realistic Voiceover)</label>
+                        <input type="password" value={elevenLabsKey} onChange={(e) => setElevenLabsKey(e.target.value)} placeholder="API Key..." className="glass-card" style={{ width: '100%', padding: '0.6rem' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Video Generation Style</label>
+                        <select value={videoStyle} onChange={(e) => setVideoStyle(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem', color: 'white', background: 'rgba(255,255,255,0.05)' }}>
+                          <option value="Cinematic Stock">Cinematic Stock Footage</option>
+                          <option value="AI Art Transitions">AI Art Transitions</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>Caption Style</label>
+                        <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)} className="glass-card" style={{ width: '100%', padding: '0.6rem', color: 'white', background: 'rgba(255,255,255,0.05)' }}>
+                          <option value="Dynamic Pop">Dynamic Pop (Hormozi Style)</option>
+                          <option value="Minimalist">Minimalist / Clean</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
