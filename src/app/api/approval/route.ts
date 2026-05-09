@@ -33,7 +33,12 @@ export async function POST(req: Request) {
       const publisherAgent = new PublisherAgent();
 
       const productionData = {
-        polished: { polishedScript: item.script },
+        polished: { 
+            polishedScript: item.script,
+            title: item.seoTitle,
+            description: item.seoDescription,
+            tags: item.seoTags ? JSON.parse(item.seoTags) : []
+        },
         original: { 
             topic: item.topic, 
             visualPrompts: JSON.parse(item.visualPrompts),

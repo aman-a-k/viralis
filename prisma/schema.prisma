@@ -24,6 +24,9 @@ model ApprovalQueue {
   script          String
   visualPrompts   String   // JSON
   captions        String   // JSON
+  seoTitle        String?
+  seoDescription  String?
+  seoTags         String?  // JSON
   status          String   @default("pending") // "pending", "approved", "rejected"
   rejectionReason String?
   createdAt       DateTime @default(now())
