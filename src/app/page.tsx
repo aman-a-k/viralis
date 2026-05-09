@@ -4,15 +4,18 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { VideoData, DashboardStats, SettingsData } from '@/types';
 import { 
-  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle, Bot, Zap
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle, Bot, Zap, History, LogOut, User as UserIcon
 } from 'lucide-react';
 import { AgentStatusView } from '@/components/AgentStatusView';
+import { TrendHistoryView } from '@/components/TrendHistoryView';
+import { signIn, signOut, useSession } from 'next-auth/react';
 
 export default function Dashboard() {
+  const { data: session, status: authStatus } = useSession();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
-  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData, agents: AgentStatus[]} | null>(null);
+  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData, agents: AgentStatus[], trends: any[]} | null>(null);
 
   // Settings Forms
   const [ytId, setYtId] = useState('');
@@ -130,6 +133,9 @@ export default function Dashboard() {
             <button className={`nav-item ${activeTab === 'content' ? 'active' : ''}`} onClick={() => setActiveTab('content')}>
               <Video size={20} /> Content Library
             </button>
+            <button className={`nav-item ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => setActiveTab('trends')}>
+              <History size={20} /> Trend History
+            </button>
             <button className={`nav-item ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}>
               <BarChart3 size={20} /> Analytics
             </button>
@@ -150,6 +156,29 @@ export default function Dashboard() {
           </div>
           <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Daemon & Auto-Healer Active</p>
         </div>
+
+        {/* User Profile / Login */}
+        <div className="glass-panel" style={{ marginTop: '1rem', padding: '1rem' }}>
+          {authStatus === 'authenticated' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              {session.user?.image ? (
+                <img src={session.user.image} alt="User" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
+              ) : (
+                <UserIcon size={32} color="var(--primary)" />
+              )}
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <p style={{ fontSize: '0.875rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{session.user?.name}</p>
+                <button onClick={() => signOut()} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.75rem', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <LogOut size={12} /> Sign Out
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => signIn('google')} className="btn btn-primary" style={{ width: '100%', fontSize: '0.875rem' }}>
+              Sign in with Google
+            </button>
+          )}
+        </div>
       </aside>
 
       {/* Main Content */}
@@ -162,6 +191,7 @@ export default function Dashboard() {
             <p style={{ color: '#94a3b8' }}>
               {activeTab === 'overview' && "Welcome back. Here's your real-time automation status."}
               {activeTab === 'content' && "View your previously generated and uploaded videos."}
+              {activeTab === 'trends' && "History of viral topics identified by TrendIntelligence."}
               {activeTab === 'analytics' && "Track your revenue and overall channel growth."}
               {activeTab === 'settings' && "Manage your API keys, OAuth logins, and daemon configuration."}
               {activeTab === 'agents' && "Monitor and instruct your specialized autonomous AI workforce."}
