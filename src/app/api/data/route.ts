@@ -27,6 +27,11 @@ export async function GET() {
       instagramAccessToken: ''
     };
 
+    const trends = await prisma.trend.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+
     const agents = [
       {
         id: 'trend-agent',
@@ -75,7 +80,9 @@ export async function GET() {
           youtubeClientSecret: settings.youtubeClientSecret || '',
           hasYoutubeAuth: !!settings.youtubeRefreshToken,
           instagramAccessToken: settings.instagramAccessToken || ''
-        }
+        },
+        agents,
+        trends
       }
     });
   } catch (error) {

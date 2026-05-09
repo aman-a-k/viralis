@@ -1,68 +1,30 @@
 import cron from 'node-cron';
-import { TrendAnalyzer } from './trendAnalyzer';
-import { ContentGenerator } from './contentGenerator';
-import { VideoCreator } from './videoCreator';
-import { Publisher } from './publisher';
-import { AnalyticsService } from './analytics';
 import { prisma } from '../lib/prisma';
+import { Publisher } from './publisher';
+import { Orchestrator } from '../agents/orchestrator';
 
 export class WorkflowScheduler {
+  private static orchestrator = new Orchestrator();
+
   static async runDailyJob(retryCount = 0) {
     console.log("=======================================");
-    console.log(`[Scheduler] Starting Daily AI Content Workflow (Attempt: ${retryCount + 1})`);
+    console.log(`[Scheduler] Starting Autonomous AI Workflow (Attempt: ${retryCount + 1})`);
     console.log("=======================================");
 
     try {
-      // 1. Get Trend
-      const trend = await TrendAnalyzer.getDailyTrend();
-
-      // 2. Generate Content Script & Visuals
-      const content = await ContentGenerator.generateVideoContent(trend);
-
-      // 3. Render Video
-      const videoUrl = await VideoCreator.renderVideo(content);
-
-      // Save to DB as pending
-      const dbVideo = await prisma.video.create({
-        data: {
-          topic: trend.topic,
-          videoUrl: videoUrl,
-          platform: 'youtube', // primary platform
-          status: 'pending'
-        }
-      });
-
-      // 4. Publish
-      const published = await Publisher.publishVideo(
-        videoUrl, 
-        `${trend.topic} - You Won't Believe This! 🤯`, 
-        `Daily update on ${trend.topic}. \n\n#${trend.keywords.join(" #")}`
-      );
-
-      if (!published) {
-        await prisma.video.update({ where: { id: dbVideo.id }, data: { status: 'failed' } });
-        throw new Error("Publishing API failed or timed out.");
-      }
-
-      await prisma.video.update({ where: { id: dbVideo.id }, data: { status: 'success' } });
-      console.log("[Scheduler] Daily Workflow Completed Successfully.");
+      // Use the intelligent orchestrator to manage the end-to-end flow
+      await this.orchestrator.executeFullWorkflow();
       
-      // 5. Periodic 30-Day Check
-      const dayOfMonth = new Date().getDate();
-      if (dayOfMonth === 1) {
-         await AnalyticsService.verify30DayPerformance();
-      }
+      console.log("[Scheduler] Autonomous Workflow cycle completed.");
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       console.error(`[Scheduler] Workflow failed: ${errorMessage}`);
       
       if (retryCount < 3) {
-        const delay = Math.pow(2, retryCount) * 60000; // Exponential backoff
-        console.log(`[Scheduler] Auto-healing: Retrying workflow entirely in ${delay / 60000} minutes...`);
+        const delay = Math.pow(2, retryCount) * 60000;
+        console.log(`[Scheduler] Auto-healing: Retrying workflow in ${delay / 60000} minutes...`);
         setTimeout(() => this.runDailyJob(retryCount + 1), delay);
-      } else {
-        console.error("[Scheduler] Maximum retries reached. Waiting for the Self-Healer daemon to pick up failed tasks.");
       }
     }
   }

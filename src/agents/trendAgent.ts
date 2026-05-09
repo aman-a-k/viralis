@@ -46,6 +46,17 @@ export class TrendAgent extends BaseAgent {
         const cleaned = finalDecision.content?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
         const result = JSON.parse(cleaned);
 
+        // 3. Save to database for history
+        await prisma.trend.create({
+          data: {
+            topic: rawTrends.topic,
+            score: rawTrends.score,
+            keywords: JSON.stringify(rawTrends.keywords),
+            isViable: result.isViable,
+            analysis: result.analysis
+          }
+        });
+
         return {
           success: true,
           message: 'Trend identified and analyzed.',
