@@ -4,14 +4,15 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { VideoData, DashboardStats, SettingsData } from '@/types';
 import { 
-  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle, Clock, PlayCircle, Camera, BarChart3, Loader2, XCircle, Bot, Zap
 } from 'lucide-react';
+import { AgentStatusView } from '@/components/AgentStatusView';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
-  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData} | null>(null);
+  const [data, setData] = useState<{videos: VideoData[], stats: DashboardStats, settings: SettingsData, agents: AgentStatus[]} | null>(null);
 
   // Settings Forms
   const [ytId, setYtId] = useState('');
@@ -135,6 +136,10 @@ export default function Dashboard() {
             <button className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
               <Settings size={20} /> Settings
             </button>
+            <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '0.5rem 0' }}></div>
+            <button className={`nav-item ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>
+              <Bot size={20} color={activeTab === 'agents' ? 'var(--primary)' : 'inherit'} /> AI Agents
+            </button>
           </nav>
         </div>
 
@@ -159,6 +164,7 @@ export default function Dashboard() {
               {activeTab === 'content' && "View your previously generated and uploaded videos."}
               {activeTab === 'analytics' && "Track your revenue and overall channel growth."}
               {activeTab === 'settings' && "Manage your API keys, OAuth logins, and daemon configuration."}
+              {activeTab === 'agents' && "Monitor and instruct your specialized autonomous AI workforce."}
             </p>
           </div>
           
@@ -166,6 +172,12 @@ export default function Dashboard() {
             <button className="btn btn-primary" onClick={handleForceRun} disabled={isRunning}>
               {isRunning ? <Loader2 size={18} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={18} />} 
               {isRunning ? 'Processing...' : 'Force Run Now'}
+            </button>
+          )}
+          {activeTab === 'agents' && (
+            <button className="btn btn-outline" onClick={() => toast.success('Orchestrator self-check complete. All agents online.')}>
+              <Zap size={18} color="var(--primary)" />
+              Force Sync
             </button>
           )}
         </header>

@@ -37,20 +37,35 @@ export abstract class BaseAgent {
    */
   abstract run(input: any): Promise<AgentResponse>;
 
-  protected async chat(prompt: string, model: string = "gpt-4o-mini"): Promise<string> {
+  protected async chat(prompt: string, model: string = "gpt-4o", tools?: OpenAI.Chat.Completions.ChatCompletionTool[]): Promise<any> {
     await this.initOpenAI();
     if (!this.openai) throw new Error("OpenAI not initialized");
 
     const response = await this.openai.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: `You are ${this.name}, ${this.role}.` },
+        { role: "system", content: `You are ${this.name}, ${this.role}. You have access to tools that you can call to perform actions. Always aim for high-quality, viral results.` },
         { role: "user", content: prompt }
       ],
+      tools,
+      tool_choice: tools ? "auto" : undefined,
       temperature: 0.7,
     });
 
-    return response.choices[0].message.content || "";
+    return response.choices[0].message;
+  }
+
+  protected async executeTool(toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall, toolHandlers: Record<string, Function>) {
+    const name = toolCall.function.name;
+    const args = JSON.parse(toolCall.function.arguments);
+    
+    this.log(`Executing tool: ${name} with args: ${JSON.stringify(args)}`);
+    
+    if (toolHandlers[name]) {
+      return await toolHandlers[name](args);
+    }
+    
+    throw new Error(`Tool ${name} not found.`);
   }
 
   protected log(message: string) {

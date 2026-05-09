@@ -38,3 +38,12 @@ export interface DashboardStats {
   subs: number;
   revenue: number;
 }
+
+export interface AgentStatus {
+  id: string;
+  name: string;
+  role: string;
+  status: 'idle' | 'working' | 'error';
+  lastAction: string;
+  capabilities: string[];
+}

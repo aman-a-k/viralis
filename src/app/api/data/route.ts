@@ -17,10 +17,42 @@ export async function GET() {
       });
     }
 
-    let settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-    if (!settings) {
-      settings = await prisma.settings.create({ data: { id: 'default' } });
-    }
+    const settings = await prisma.settings.findFirst({ where: { id: 'default' } }) || {
+      youtubeId: '',
+      instagramId: '',
+      openAiKey: '',
+      youtubeClientId: '',
+      youtubeClientSecret: '',
+      youtubeRefreshToken: '',
+      instagramAccessToken: ''
+    };
+
+    const agents = [
+      {
+        id: 'trend-agent',
+        name: 'TrendIntelligence',
+        role: 'Researcher',
+        status: 'idle',
+        lastAction: 'Waiting for daily trend fetch...',
+        capabilities: ['Google Trends', 'Viral Analysis', 'Niche Discovery']
+      },
+      {
+        id: 'content-agent',
+        name: 'CreativeContent',
+        role: 'Strategist',
+        status: 'idle',
+        lastAction: 'Ready to write scripts...',
+        capabilities: ['Scriptwriting', 'Hook Optimization', 'Visual Prompting']
+      },
+      {
+        id: 'video-agent',
+        name: 'VideoProduction',
+        role: 'Editor',
+        status: 'idle',
+        lastAction: 'Waiting for script input...',
+        capabilities: ['FFmpeg', 'TTS Generation', 'Captioning']
+      }
+    ];
 
     return NextResponse.json({
       success: true,
@@ -36,7 +68,6 @@ export async function GET() {
           subs: analytics.subscribersGained
         },
         settings: {
-          youtubeId: settings.youtubeId || '',
           instagramId: settings.instagramId || '',
           hasOpenAi: !!settings.openAiKey,
           openAiKey: settings.openAiKey || '',
