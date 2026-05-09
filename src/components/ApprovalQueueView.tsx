@@ -8,6 +8,9 @@ interface ApprovalItem {
   script: string;
   visualPrompts: string;
   captions: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoTags?: string;
   createdAt: string;
 }
 
@@ -84,17 +87,35 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
                   <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--surface-border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                       <ImageIcon size={16} color="var(--secondary)" />
-                      <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Visual Prompts</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Visual Prompts (Scenes)</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {JSON.parse(item.visualPrompts).map((prompt: string, i: number) => (
+                      {JSON.parse(item.visualPrompts).map((scene: any, i: number) => (
                         <div key={i} style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          {prompt}
+                          <strong>T:</strong> {scene.spokenText}<br/>
+                          <strong>V:</strong> {scene.bRollPrompt}
                         </div>
                       ))}
                     </div>
                   </div>
                 </div>
+
+                {item.seoTitle && (
+                  <div style={{ marginTop: '2rem', background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--surface-border)' }}>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--success)' }}>SEO & Metadata</span>
+                     </div>
+                     <p style={{ fontSize: '0.875rem', color: '#fff', marginBottom: '0.5rem' }}><strong>Title:</strong> {item.seoTitle}</p>
+                     <p style={{ fontSize: '0.875rem', color: '#cbd5e1', marginBottom: '1rem', whiteSpace: 'pre-wrap' }}><strong>Description:</strong><br/>{item.seoDescription}</p>
+                     {item.seoTags && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          {JSON.parse(item.seoTags).map((tag: string, i: number) => (
+                            <span key={i} style={{ fontSize: '0.7rem', padding: '0.25rem 0.6rem', borderRadius: '20px', background: 'rgba(255,255,255,0.1)' }}>#{tag}</span>
+                          ))}
+                        </div>
+                     )}
+                  </div>
+                )}
               </div>
             ))
           )}

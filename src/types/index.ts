@@ -15,6 +15,11 @@ export interface GeneratedContent {
   captions: { startTime: number; endTime: number; text: string }[];
   visualPrompts: string[];
   scenes?: Scene[]; // Pro structure
+  
+  // Advanced SEO Metadata
+  title?: string;
+  description?: string;
+  tags?: string[];
 }
 
 export interface SettingsData {

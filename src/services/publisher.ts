@@ -6,7 +6,7 @@ export class Publisher {
   /**
    * Uploads the rendered video to YouTube and Instagram using their respective APIs.
    */
-  static async publishVideo(videoPath: string, title: string, description: string): Promise<boolean> {
+  static async publishVideo(videoPath: string, title: string, description: string, tags: string[] = []): Promise<boolean> {
     console.log(`[Publisher] Preparing to upload video: ${title}`);
     
     const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
@@ -19,7 +19,7 @@ export class Publisher {
 
     try {
       if (ytKey) {
-         await this.publishToYouTube(videoPath, title, description);
+         await this.publishToYouTube(videoPath, title, description, tags);
       }
       if (igKey) {
          // Instagram Graph API integration logic would go here
@@ -35,7 +35,7 @@ export class Publisher {
     }
   }
 
-  private static async publishToYouTube(videoPath: string, title: string, description: string) {
+  private static async publishToYouTube(videoPath: string, title: string, description: string, tags: string[]) {
       console.log("[Publisher] Authenticating with YouTube API...");
       
       const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
@@ -58,6 +58,9 @@ export class Publisher {
 
       console.log("[Publisher] Uploading to YouTube Shorts...");
       
+      // Ensure 'shorts' is always included
+      const finalTags = Array.from(new Set(['shorts', ...tags]));
+      
       // We check if the file actually exists (if it's a local mock, we just pretend)
       if (fs.existsSync(videoPath)) {
         const res = await youtube.videos.insert({
@@ -66,7 +69,7 @@ export class Publisher {
               snippet: {
                 title: title,
                 description: description,
-                tags: ['shorts', 'trending', 'ai'],
+                tags: finalTags,
                 categoryId: '24', // Entertainment
               },
               status: {

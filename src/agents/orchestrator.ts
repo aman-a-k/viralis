@@ -35,8 +35,11 @@ export class Orchestrator {
         data: {
           topic: originalTrend.topic,
           script: contentResult.data.polished?.polishedScript || contentResult.data.original.script,
-          visualPrompts: JSON.stringify(contentResult.data.polished?.refinedVisualPrompts || contentResult.data.original.visualPrompts),
+          visualPrompts: JSON.stringify(contentResult.data.polished?.refinedScenes || contentResult.data.original.scenes || []),
           captions: JSON.stringify(contentResult.data.original.captions),
+          seoTitle: contentResult.data.polished?.title,
+          seoDescription: contentResult.data.polished?.description,
+          seoTags: JSON.stringify(contentResult.data.polished?.tags || []),
           status: 'pending'
         }
       });

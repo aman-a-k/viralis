@@ -57,18 +57,17 @@ export class VideoCreator {
         }
       }
 
-      // 3. Render Final Video
-      console.log(`[VideoCreator] Rendering final .mp4 with ${settings?.videoStyle || 'Cinematic Stock'} style...`);
+      // 3. Generate ASS Subtitles for Professional Captions
+      const assPath = path.join(tempDir, `captions_${timestamp}.ass`);
+      this.generateASSCaptions(content.captions || [], assPath, settings?.captionStyle || 'Dynamic Pop');
+
+      // 4. Render Final Video in 4K
+      console.log(`[VideoCreator] Rendering final 4K .mp4 with ${settings?.videoStyle || 'Cinematic Stock'} style...`);
       
       await new Promise<void>((resolve, reject) => {
         let command = ffmpeg();
         
         if (hasRealVisuals && bRollPaths.length > 0) {
-           // Complex FFmpeg logic for concatenating multiple videos goes here.
-           // For stability and simplicity in this automated flow, if we have multiple clips,
-           // we'll use a file list approach or complex filter.
-           // To keep the initial setup robust, we'll create a single fallback or use the first clip looped if concat fails.
-           // A true pro editor would create a txt file and use the concat demuxer.
            const listPath = path.join(tempDir, `list_${timestamp}.txt`);
            const listContent = bRollPaths.map(p => `file '${p.replace(/\\/g, '/')}'`).join('\n');
            fs.writeFileSync(listPath, listContent);
@@ -78,7 +77,7 @@ export class VideoCreator {
              .inputOptions(['-f concat', '-safe 0']);
         } else {
            command = command
-             .input('color=c=#0f172a:s=1080x1920:r=30') // Vertical Shorts format (Slate/Dark color)
+             .input('color=c=#0f172a:s=2160x3840:r=30') // 4K Vertical Shorts format
              .inputFormat('lavfi');
         }
 
@@ -86,30 +85,27 @@ export class VideoCreator {
           .input(finalAudioPath)
           .outputOptions([
             '-c:v libx264',
+            '-preset fast',
             '-tune stillimage',
             '-c:a aac',
-            '-b:a 192k',
+            '-b:a 320k', // Superb Audio Quality
             '-pix_fmt yuv420p',
             '-shortest',
           ])
-          // Pro Caption Styling
-          .videoFilters([{
-            filter: 'drawtext',
-            options: {
-              text: settings?.captionStyle === 'Minimalist' ? 'Tap to unmute' : 'WAIT FOR IT...',
-              fontsize: settings?.captionStyle === 'Minimalist' ? 50 : 90,
-              fontcolor: 'yellow',
-              fontfile: 'Arial', // Ensure you have fonts available in a real environment
-              x: '(w-text_w)/2',
-              y: '(h-text_h)/2',
-              box: 1,
-              boxcolor: 'black@0.6',
-              boxborderw: 15
+          // Apply Professional ASS Subtitles and Scale to 4K if needed
+          .videoFilters([
+            {
+              filter: 'scale',
+              options: '2160:3840'
+            },
+            {
+              filter: 'ass',
+              options: assPath.replace(/\\/g, '\\\\').replace(/:/g, '\\:') // Escape path for ffmpeg filter
             }
-          }])
+          ])
           .save(outputPath)
           .on('end', () => {
-            console.log('[VideoCreator] FFmpeg rendering finished.');
+            console.log('[VideoCreator] FFmpeg 4K rendering finished.');
             resolve();
           })
           .on('error', (err) => {
@@ -122,6 +118,7 @@ export class VideoCreator {
       
       // Clean up temp files
       if (fs.existsSync(finalAudioPath)) fs.unlinkSync(finalAudioPath);
+      if (fs.existsSync(assPath)) fs.unlinkSync(assPath);
       bRollPaths.forEach(p => { if(fs.existsSync(p)) fs.unlinkSync(p); });
 
       return outputPath;
@@ -129,6 +126,57 @@ export class VideoCreator {
       console.error("[VideoCreator] Real rendering failed.", error);
       throw new Error("Video rendering failed due to missing dependencies or FFmpeg error.");
     }
+  }
+
+  private static generateASSCaptions(captions: { startTime: number; endTime: number; text: string }[], outputPath: string, style: string) {
+    const isHormozi = style === 'Dynamic Pop';
+    
+    // ASS File Header
+    let assContent = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 2160
+PlayResY: 3840
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+`;
+
+    if (isHormozi) {
+      // Massive, bold, yellow text with thick black outline centered in the middle
+      assContent += `Style: Default,Arial,140,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,15,0,5,10,10,1920,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+    } else {
+      // Minimalist white text at the bottom
+      assContent += `Style: Default,Helvetica,90,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,5,0,2,10,10,200,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+    }
+
+    // Helper to format seconds to ASS time format (H:MM:SS.cs)
+    const formatTime = (seconds: number) => {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      const cs = Math.floor((seconds % 1) * 100);
+      return \`\${h}:\${m.toString().padStart(2, '0')}:\${s.toString().padStart(2, '0')}.\${cs.toString().padStart(2, '0')}\`;
+    };
+
+    // If no captions were generated (fallback), add a single one
+    if (!captions || captions.length === 0) {
+      captions = [{ startTime: 0, endTime: 5, text: "Wait for it..." }];
+    }
+
+    captions.forEach(cap => {
+      const start = formatTime(cap.startTime);
+      const end = formatTime(cap.endTime);
+      
+      if (isHormozi) {
+        // Simple pop effect using ASS tags: {\an5\fscx120\fscy120\t(0,100,\fscx100\fscy100)} (scale down pop)
+        assContent += \`Dialogue: 0,\${start},\${end},Default,,0,0,0,,{\\\\an5\\\\fscx120\\\\fscy120\\\\t(0,100,\\\\fscx100\\\\fscy100)}\${cap.text}\\n\`;
+      } else {
+        assContent += \`Dialogue: 0,\${start},\${end},Default,,0,0,0,,\${cap.text}\\n\`;
+      }
+    });
+
+    fs.writeFileSync(outputPath, assContent);
+    console.log(`[VideoCreator] Generated ASS Captions at ${outputPath}`);
   }
 
   private static async generateElevenLabsAudio(text: string, outputPath: string, apiKey: string) {

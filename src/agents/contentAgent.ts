@@ -46,7 +46,9 @@ export class ContentAgent extends BaseAgent {
             "durationEstimate": number
           }
         ],
-        "hashtags": ["string"]
+        "title": "A highly clickable, click-through-rate optimized title (under 60 chars)",
+        "description": "An engaging description including the CTA and a summary.",
+        "tags": ["trending", "viral", "nicheSpecificTag"]
       }
       `;
       
