@@ -1,5 +1,6 @@
 import { BaseAgent, AgentResponse } from './base';
 import { ContentGenerator } from '../services/contentGenerator';
+import { prisma } from '../lib/prisma';
 
 export class ContentAgent extends BaseAgent {
   constructor() {

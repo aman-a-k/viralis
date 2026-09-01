@@ -1,6 +1,7 @@
 import { BaseAgent, AgentResponse } from './base';
 import { TrendAnalyzer } from '../services/trendAnalyzer';
 import OpenAI from 'openai';
+import { prisma } from '../lib/prisma';
 
 export class TrendAgent extends BaseAgent {
   constructor() {

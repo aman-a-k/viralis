@@ -7,8 +7,14 @@ import path from 'path';
 import axios from 'axios';
 import { prisma } from '../lib/prisma';
 
-// Set ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// Set ffmpeg path safely
+try {
+  if (ffmpegInstaller && ffmpegInstaller.path) {
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+  }
+} catch (err) {
+  console.warn('[VideoCreator] Could not set ffmpegInstaller path:', err);
+}
 
 export class VideoCreator {
   /**
@@ -155,7 +161,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
       const m = Math.floor((seconds % 3600) / 60);
       const s = Math.floor(seconds % 60);
       const cs = Math.floor((seconds % 1) * 100);
-      return \`\${h}:\${m.toString().padStart(2, '0')}:\${s.toString().padStart(2, '0')}.\${cs.toString().padStart(2, '0')}\`;
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
     };
 
     // If no captions were generated (fallback), add a single one
@@ -169,9 +175,9 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
       
       if (isHormozi) {
         // Simple pop effect using ASS tags: {\an5\fscx120\fscy120\t(0,100,\fscx100\fscy100)} (scale down pop)
-        assContent += \`Dialogue: 0,\${start},\${end},Default,,0,0,0,,{\\\\an5\\\\fscx120\\\\fscy120\\\\t(0,100,\\\\fscx100\\\\fscy100)}\${cap.text}\\n\`;
+        assContent += `Dialogue: 0,${start},${end},Default,,0,0,0,,{\\an5\\fscx120\\fscy120\\t(0,100,\\fscx100\\fscy100)}${cap.text}\n`;
       } else {
-        assContent += \`Dialogue: 0,\${start},\${end},Default,,0,0,0,,\${cap.text}\\n\`;
+        assContent += `Dialogue: 0,${start},${end},Default,,0,0,0,,${cap.text}\n`;
       }
     });
 
