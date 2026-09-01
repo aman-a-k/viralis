@@ -29,7 +29,7 @@ export class Orchestrator {
       if (!contentResult.success) throw new Error(contentResult.message);
 
       // 3. Save to Approval Queue (Human-in-the-Loop)
-      this.log(`Sending content for "${originalTrend.topic}" to approval queue...`);
+      console.log(`Sending content for "${originalTrend.topic}" to approval queue...`);
       
       await prisma.approvalQueue.create({
         data: {

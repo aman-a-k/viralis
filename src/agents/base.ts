@@ -55,9 +55,10 @@ export abstract class BaseAgent {
     return response.choices[0].message;
   }
 
-  protected async executeTool(toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall, toolHandlers: Record<string, Function>) {
-    const name = toolCall.function.name;
-    const args = JSON.parse(toolCall.function.arguments);
+  protected async executeTool(toolCall: any, toolHandlers: Record<string, Function>) {
+    const fn = toolCall.function || toolCall;
+    const name = fn.name;
+    const args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : fn.arguments;
     
     this.log(`Executing tool: ${name} with args: ${JSON.stringify(args)}`);
     
