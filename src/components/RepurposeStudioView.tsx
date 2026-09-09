@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { ProjectData, ClipData } from '@/types';
 import { 
   Scissors, Play, Pause, Smartphone, Square, Monitor, Copy, Check, 
   Send, Clock, Sparkles, Volume2, VolumeX, Maximize2, Share2, 
   ThumbsUp, MessageSquare, Repeat, Heart, Bookmark, Music, ShieldCheck, 
-  ChevronDown, Plus, RefreshCw, Layers
+  ChevronDown, Plus, RefreshCw, Layers, Upload, Download, Film, Video as VideoIcon
 } from 'lucide-react';
 
 interface RepurposeStudioViewProps {
@@ -19,21 +19,32 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
   const [videoUrl, setVideoUrl] = useState('');
   const [videoTitle, setVideoTitle] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
   const [showImportDrawer, setShowImportDrawer] = useState(false);
   
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedClipId, setSelectedClipId] = useState<string>(projects[0]?.clips?.[0]?.id || '');
   const [aspectRatio, setAspectRatio] = useState<'9:16' | '1:1' | '16:9'>('9:16');
-  const [captionStyle, setCaptionStyle] = useState<'Dynamic Pop' | 'Minimalist' | 'Editorial'>('Dynamic Pop');
+  const [captionStyle, setCaptionStyle] = useState<'Dynamic Pop' | 'Minimalist'>('Dynamic Pop');
   const [activePlatform, setActivePlatform] = useState<'instagram' | 'youtube' | 'linkedin' | 'twitter' | 'tiktok'>('instagram');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [activeVideoSrc, setActiveVideoSrc] = useState<string>('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const activeProject = projects.find(p => p.id === selectedProjectId) || projects[0];
   const activeClip = activeProject?.clips?.find(c => c.id === selectedClipId) || activeProject?.clips?.[0];
 
-  const handleIngest = async (e: React.FormEvent) => {
+  // Update active video source whenever activeClip changes
+  useEffect(() => {
+    if (activeClip) {
+      const defaultSrc = activeClip.videoUrl || `/clips/clip_${activeClip.id}_9_16_pop.mp4`;
+      setActiveVideoSrc(defaultSrc);
+    }
+  }, [activeClip]);
+
+  const handleIngestUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!videoUrl && !videoTitle) {
       toast.error('Please enter a YouTube link or episode title.');
@@ -41,7 +52,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
     }
 
     setIsProcessing(true);
-    toast.loading('Analyzing long-form video transcript...', { id: 'ingest' });
+    toast.loading('Analyzing long-form video & cutting viral moments...', { id: 'ingest' });
 
     try {
       const res = await fetch('/api/repurpose', {
@@ -56,14 +67,17 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
 
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message || 'Clips extracted with virality scoring!', { id: 'ingest', duration: 4000 });
+        toast.success(data.message || 'Clips extracted with real video cuts!', { id: 'ingest', duration: 4000 });
         setVideoUrl('');
         setVideoTitle('');
         setShowImportDrawer(false);
         onRefresh();
         if (data.project) {
           setSelectedProjectId(data.project.id);
-          if (data.clips?.[0]) setSelectedClipId(data.clips[0].id);
+          if (data.clips?.[0]) {
+            setSelectedClipId(data.clips[0].id);
+            setActiveVideoSrc(data.clips[0].videoUrl || '');
+          }
         }
       } else {
         toast.error(data.error || 'Ingest failed', { id: 'ingest' });
@@ -72,6 +86,77 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
       toast.error('Error connecting to Viralis API.', { id: 'ingest' });
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+
+    setIsProcessing(true);
+    toast.loading(`Uploading & cutting "${file.name}" with FFmpeg...`, { id: 'upload-video' });
+
+    try {
+      const res = await fetch('/api/repurpose/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Video processed! Extracted ${data.clips?.length || 0} real clips.`, { id: 'upload-video', duration: 4500 });
+        setShowImportDrawer(false);
+        onRefresh();
+        if (data.project) {
+          setSelectedProjectId(data.project.id);
+          if (data.clips?.[0]) {
+            setSelectedClipId(data.clips[0].id);
+            setActiveVideoSrc(data.clips[0].videoUrl || '');
+          }
+        }
+      } else {
+        toast.error(data.error || 'Upload failed', { id: 'upload-video' });
+      }
+    } catch (err) {
+      toast.error('Network error uploading video.', { id: 'upload-video' });
+    } finally {
+      setIsProcessing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRenderAspectOrStyle = async (newAspect: '9:16' | '1:1' | '16:9', newStyle: 'Dynamic Pop' | 'Minimalist') => {
+    if (!activeClip) return;
+    setIsRendering(true);
+    toast.loading(`Rendering real ${newAspect} cut with ${newStyle} subtitles...`, { id: 'render-clip' });
+
+    try {
+      const res = await fetch('/api/repurpose/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clipId: activeClip.id,
+          aspectRatio: newAspect,
+          captionStyle: newStyle,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.videoUrl) {
+        setActiveVideoSrc(data.videoUrl);
+        toast.success(`Video updated! Playing ${newAspect} cut.`, { id: 'render-clip', duration: 3500 });
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Could not render clip', { id: 'render-clip' });
+      }
+    } catch (err) {
+      toast.error('Render request failed', { id: 'render-clip' });
+    } finally {
+      setIsRendering(false);
     }
   };
 
@@ -115,12 +200,21 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* Hidden File Input for Direct Computer Upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept="video/mp4,video/mov,video/quicktime,video/webm"
+        style={{ display: 'none' }}
+      />
+
       {/* Top Studio Control Bar */}
       <div className="panel-card" style={{ padding: '0.85rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <div>
             <span className="text-subtle" style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Current Project
+              Master Episode
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.15rem' }}>
               <select
@@ -128,7 +222,10 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
                 onChange={(e) => {
                   setSelectedProjectId(e.target.value);
                   const proj = projects.find(p => p.id === e.target.value);
-                  if (proj?.clips?.[0]) setSelectedClipId(proj.clips[0].id);
+                  if (proj?.clips?.[0]) {
+                    setSelectedClipId(proj.clips[0].id);
+                    setActiveVideoSrc(proj.clips[0].videoUrl || '');
+                  }
                 }}
                 style={{
                   background: 'transparent',
@@ -148,7 +245,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
                 ))}
               </select>
               <span className="badge badge-neutral" style={{ fontSize: '0.6875rem' }}>
-                {activeProject?.clips?.length || 0} Highlights
+                {activeProject?.clips?.length || 0} Surfaced Highlights
               </span>
             </div>
           </div>
@@ -156,11 +253,19 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
 
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <button 
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.75rem', padding: '0.45rem 0.85rem' }}
+          >
+            <Upload size={13} /> Upload Video File
+          </button>
+          <button 
             onClick={() => setShowImportDrawer(!showImportDrawer)}
             className="btn btn-secondary"
             style={{ fontSize: '0.75rem', padding: '0.45rem 0.85rem' }}
           >
-            <Plus size={13} /> Import Video Link
+            <Plus size={13} /> Import Link
           </button>
           {activeClip && (
             <button
@@ -168,7 +273,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               className="btn btn-primary"
               style={{ fontSize: '0.75rem', padding: '0.45rem 0.85rem' }}
             >
-              <Send size={13} /> Push Clip to Queue
+              <Send size={13} /> Push to Queue
             </button>
           )}
         </div>
@@ -178,15 +283,15 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
       {showImportDrawer && (
         <div className="panel-card" style={{ background: 'var(--surface-subtle)', border: '1px solid var(--surface-border)', padding: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h3 style={{ fontSize: '0.875rem', fontWeight: 700 }}>Import Long-form Masterclass or Podcast</h3>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: 700 }}>Import Long-form Video for Real Cutting</h3>
             <button onClick={() => setShowImportDrawer(false)} className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>
               Cancel
             </button>
           </div>
-          <form onSubmit={handleIngest} style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <form onSubmit={handleIngestUrl} style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
             <input
               type="text"
-              placeholder="Episode Title..."
+              placeholder="Episode Title (e.g. Scaling From 0 to 1M Users)..."
               value={videoTitle}
               onChange={(e) => setVideoTitle(e.target.value)}
               className="input-field"
@@ -194,7 +299,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
             />
             <input
               type="text"
-              placeholder="Paste YouTube, Zoom, or Google Drive URL..."
+              placeholder="Paste YouTube or MP4 URL..."
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
               className="input-field"
@@ -202,14 +307,14 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
             />
             <button type="submit" className="btn btn-primary" disabled={isProcessing} style={{ minWidth: '150px' }}>
               {isProcessing ? <RefreshCw size={13} className="animate-spin" /> : <Scissors size={13} />}
-              {isProcessing ? 'Analyzing...' : 'Extract Highlights'}
+              {isProcessing ? 'Cutting Video...' : 'Extract & Cut Clips'}
             </button>
           </form>
         </div>
       )}
 
       {/* 3-Column Studio Workspace */}
-      <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(360px, 1fr) 380px', gap: '1.25rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(380px, 1fr) 380px', gap: '1.25rem', alignItems: 'start' }}>
         
         {/* COLUMN 1: Ranked Highlights Timeline */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -218,7 +323,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               Surfaced Highlights ({activeProject?.clips?.length || 0})
             </span>
             <span className="badge badge-primary" style={{ fontSize: '0.625rem' }}>
-              Algorithm Scored
+              Ranked by Virality
             </span>
           </div>
 
@@ -231,7 +336,11 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               return (
                 <div
                   key={clip.id}
-                  onClick={() => setSelectedClipId(clip.id)}
+                  onClick={() => {
+                    setSelectedClipId(clip.id);
+                    const clipUrl = clip.videoUrl || `/clips/clip_${clip.id}_9_16_pop.mp4`;
+                    setActiveVideoSrc(clipUrl);
+                  }}
                   className="panel-card"
                   style={{
                     padding: '0.85rem 1rem',
@@ -271,7 +380,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.55rem', borderTop: '1px solid var(--surface-border-subtle)', paddingTop: '0.45rem' }}>
                     <span style={{ fontSize: '0.6875rem', color: 'var(--foreground-muted)', fontWeight: 500 }}>
-                      Duration: {clip.duration}s
+                      Cut Duration: {clip.duration}s
                     </span>
                     <span className={`badge ${clip.status === 'approved' ? 'badge-success' : 'badge-neutral'}`} style={{ fontSize: '0.625rem' }}>
                       {clip.status}
@@ -283,28 +392,37 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
           </div>
         </div>
 
-        {/* COLUMN 2: Professional Media Player & Aspect Canvas */}
+        {/* COLUMN 2: Real Media Player & Aspect Ratio Studio */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* Aspect Ratio & Caption Format Bar */}
           <div className="panel-card" style={{ padding: '0.65rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div className="segmented-control">
               <button
                 type="button"
-                onClick={() => setAspectRatio('9:16')}
+                onClick={() => {
+                  setAspectRatio('9:16');
+                  handleRenderAspectOrStyle('9:16', captionStyle);
+                }}
                 className={`segmented-item ${aspectRatio === '9:16' ? 'active' : ''}`}
               >
                 <Smartphone size={12} /> 9:16 Vertical
               </button>
               <button
                 type="button"
-                onClick={() => setAspectRatio('1:1')}
+                onClick={() => {
+                  setAspectRatio('1:1');
+                  handleRenderAspectOrStyle('1:1', captionStyle);
+                }}
                 className={`segmented-item ${aspectRatio === '1:1' ? 'active' : ''}`}
               >
                 <Square size={12} /> 1:1 Square
               </button>
               <button
                 type="button"
-                onClick={() => setAspectRatio('16:9')}
+                onClick={() => {
+                  setAspectRatio('16:9');
+                  handleRenderAspectOrStyle('16:9', captionStyle);
+                }}
                 className={`segmented-item ${aspectRatio === '16:9' ? 'active' : ''}`}
               >
                 <Monitor size={12} /> 16:9 Landscape
@@ -315,7 +433,10 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               <span className="text-subtle" style={{ fontSize: '0.6875rem', fontWeight: 600 }}>Captions:</span>
               <button
                 type="button"
-                onClick={() => setCaptionStyle('Dynamic Pop')}
+                onClick={() => {
+                  setCaptionStyle('Dynamic Pop');
+                  handleRenderAspectOrStyle(aspectRatio, 'Dynamic Pop');
+                }}
                 className={`segmented-item ${captionStyle === 'Dynamic Pop' ? 'active' : ''}`}
                 style={{ fontSize: '0.6875rem' }}
               >
@@ -323,7 +444,10 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               </button>
               <button
                 type="button"
-                onClick={() => setCaptionStyle('Minimalist')}
+                onClick={() => {
+                  setCaptionStyle('Minimalist');
+                  handleRenderAspectOrStyle(aspectRatio, 'Minimalist');
+                }}
                 className={`segmented-item ${captionStyle === 'Minimalist' ? 'active' : ''}`}
                 style={{ fontSize: '0.6875rem' }}
               >
@@ -332,7 +456,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
             </div>
           </div>
 
-          {/* Video Player Display */}
+          {/* REAL VIDEO PLAYER CONTAINER */}
           <div 
             className="panel-card" 
             style={{ 
@@ -345,12 +469,12 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
               border: '1px solid var(--surface-border)'
             }}
           >
-            {/* Monitor Stage */}
+            {/* Monitor Stage with Real <video> tag */}
             <div
               style={{
                 width: '100%',
                 height: aspectRatio === '9:16' ? '460px' : aspectRatio === '1:1' ? '360px' : '280px',
-                background: 'linear-gradient(180deg, #11141a 0%, #080a0d 100%)',
+                background: '#000000',
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
@@ -358,117 +482,81 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
                 transition: 'height 0.2s ease',
               }}
             >
-              {/* Speaker Video Silhouette Simulation */}
-              <div 
-                style={{ 
-                  width: aspectRatio === '9:16' ? '250px' : '100%', 
-                  height: '100%', 
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'radial-gradient(circle at 50% 40%, #1e2433 0%, #0d1017 80%)'
-                }}
-              >
-                {/* Active Speaker Face Tracking Guide Box */}
-                <div 
+              {isRendering ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                  <RefreshCw className="animate-spin" size={24} color="var(--primary)" />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--foreground-muted)' }}>Cutting & Reframing video with FFmpeg...</span>
+                </div>
+              ) : activeVideoSrc ? (
+                <video
+                  ref={videoRef}
+                  key={`${activeClip?.id}-${aspectRatio}-${captionStyle}-${activeVideoSrc}`}
+                  src={activeVideoSrc}
+                  controls
+                  autoPlay
+                  loop
+                  playsInline
                   style={{
-                    position: 'absolute',
-                    top: '25%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    width: '110px',
-                    height: '110px',
-                    border: '1px dashed rgba(16, 185, 129, 0.45)',
-                    borderRadius: '8px',
-                    pointerEvents: 'none',
+                    width: aspectRatio === '9:16' ? 'auto' : '100%',
+                    maxWidth: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    borderRadius: '4px',
                   }}
-                >
-                  <span style={{ position: 'absolute', top: -14, left: 0, fontSize: '0.5625rem', color: '#10b981', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Tracking: Speaker 1
-                  </span>
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '1rem' }}>
+                  <Film size={28} color="var(--foreground-subtle)" style={{ margin: '0 auto 0.5rem auto' }} />
+                  <p className="text-muted" style={{ fontSize: '0.75rem' }}>Select a clip to play its real cut video.</p>
+                  <button 
+                    onClick={() => handleRenderAspectOrStyle(aspectRatio, captionStyle)} 
+                    className="btn btn-primary" 
+                    style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}
+                  >
+                    Render Clip Video
+                  </button>
                 </div>
-
-                {/* Animated Subtitle Rendering */}
-                <div 
-                  style={{ 
-                    position: 'absolute', 
-                    bottom: '22%', 
-                    left: '10%', 
-                    right: '10%', 
-                    textAlign: 'center', 
-                    pointerEvents: 'none',
-                    zIndex: 10
-                  }}
-                >
-                  {captionStyle === 'Dynamic Pop' ? (
-                    <div style={{ display: 'inline-flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.35rem', background: 'rgba(0,0,0,0.65)', padding: '0.4rem 0.85rem', borderRadius: '6px' }}>
-                      <span style={{ fontSize: '1.05rem', fontWeight: 900, color: '#ffffff', textTransform: 'uppercase', letterSpacing: '-0.02em' }}>
-                        YOU DON&apos;T NEED
-                      </span>
-                      <span style={{ fontSize: '1.15rem', fontWeight: 900, color: '#facc15', textTransform: 'uppercase', letterSpacing: '-0.02em' }}>
-                        MORE CONTENT!
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'inline-block', background: 'rgba(0,0,0,0.75)', padding: '0.35rem 0.75rem', borderRadius: '4px' }}>
-                      <p style={{ fontSize: '0.8125rem', color: '#f4f4f5', fontWeight: 500 }}>
-                        &quot;You don&apos;t need more content—you need better leverage.&quot;
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
 
               {/* Status Pill Overlays */}
-              <div style={{ position: 'absolute', top: 12, left: 14, display: 'flex', gap: '0.35rem' }}>
-                <span className="badge badge-neutral" style={{ fontSize: '0.625rem', background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
-                  1080p 60fps
+              <div style={{ position: 'absolute', top: 12, left: 14, display: 'flex', gap: '0.35rem', pointerEvents: 'none' }}>
+                <span className="badge badge-neutral" style={{ fontSize: '0.625rem', background: 'rgba(0,0,0,0.75)', color: '#fff' }}>
+                  {aspectRatio} Reframe
                 </span>
-                <span className="badge badge-success" style={{ fontSize: '0.625rem', background: 'rgba(0,0,0,0.65)' }}>
-                  Auto-Reframe Active
+                <span className="badge badge-success" style={{ fontSize: '0.625rem', background: 'rgba(0,0,0,0.75)' }}>
+                  Burned Subtitles
                 </span>
               </div>
             </div>
 
-            {/* Video Player Transport Controls */}
-            <div style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface-subtle)', borderTop: '1px solid var(--surface-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {/* Timeline scrubber bar */}
-              <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.12)', borderRadius: '2px', position: 'relative', cursor: 'pointer' }}>
-                <div style={{ width: '38%', height: '100%', background: 'var(--primary)', borderRadius: '2px' }}></div>
+            {/* Video Player Action Bar */}
+            <div style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--surface-subtle)', borderTop: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)' }}>
+                  Clip #{activeClip && activeProject?.clips ? activeProject.clips.findIndex(c => c.id === activeClip.id) + 1 : 1}: {activeClip?.title}
+                </span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className="btn btn-ghost"
-                    style={{ padding: '0.25rem', color: '#fff' }}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {activeVideoSrc && (
+                  <a
+                    href={activeVideoSrc}
+                    download={`viralis_${activeClip?.id || 'clip'}_${aspectRatio.replace(':', '_')}.mp4`}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.7rem', padding: '0.3rem 0.65rem' }}
                   >
-                    {isPlaying ? <Pause size={15} /> : <Play size={15} />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsMuted(!isMuted)}
-                    className="btn btn-ghost"
-                    style={{ padding: '0.25rem', color: 'var(--foreground-muted)' }}
-                  >
-                    {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                  </button>
-
-                  <span style={{ fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--foreground-muted)' }}>
-                    00:18 / 00:{activeClip?.duration || 47}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span className="text-subtle" style={{ fontSize: '0.6875rem' }}>Speed: 1.0x</span>
-                  <button type="button" className="btn btn-ghost" style={{ padding: '0.25rem' }}>
-                    <Maximize2 size={13} />
-                  </button>
-                </div>
+                    <Download size={12} /> Download .MP4
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleRenderAspectOrStyle(aspectRatio, captionStyle)}
+                  disabled={isRendering}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.7rem', padding: '0.3rem 0.65rem' }}
+                >
+                  <RefreshCw size={11} className={isRendering ? 'animate-spin' : ''} /> Re-Cut
+                </button>
               </div>
             </div>
           </div>
@@ -476,10 +564,15 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
           {/* Transcript Inspector */}
           {activeClip && (
             <div className="panel-card" style={{ padding: '0.85rem 1rem' }}>
-              <span className="text-subtle" style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                Diarized Segment Transcript
-              </span>
-              <p style={{ fontSize: '0.8125rem', color: 'var(--foreground-muted)', marginTop: '0.35rem', lineHeight: 1.5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                <span className="text-subtle" style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase' }}>
+                  Cut Timecode Range: {Math.floor(activeClip.startTime / 60)}:{String(Math.floor(activeClip.startTime % 60)).padStart(2, '0')} to {Math.floor(activeClip.endTime / 60)}:{String(Math.floor(activeClip.endTime % 60)).padStart(2, '0')} ({activeClip.duration}s)
+                </span>
+                <span style={{ fontSize: '0.6875rem', color: '#10b981', fontWeight: 700 }}>
+                  Virality Probability: {activeClip.viralityScore}%
+                </span>
+              </div>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--foreground-muted)', lineHeight: 1.5 }}>
                 &quot;{activeClip.transcriptSegment}&quot;
               </p>
             </div>
@@ -491,7 +584,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
           <div className="panel-card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--foreground-muted)' }}>
-                Platform Preview & Native Copy
+                Platform Preview & Copy
               </span>
               <button
                 type="button"
