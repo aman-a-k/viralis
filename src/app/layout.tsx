@@ -4,8 +4,8 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "AI Social Automator | Daily Trend Videos",
-  description: "Automated 4K video generation and publishing for YouTube and Instagram.",
+  title: "Viralis — Go Viral, On Autopilot | AI Video Repurposing & Distribution",
+  description: "Viralis turns long-form video into a self-optimizing content engine — automatically extracting viral highlights, reframing 9:16 with dynamic captions, and learning from performance data.",
 };
 
 export default function RootLayout({
