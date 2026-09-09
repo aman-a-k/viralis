@@ -38,14 +38,20 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const activeProject = projects.find(p => p.id === selectedProjectId) || projects[0];
-  const activeClip = activeProject?.clips?.find(c => c.id === selectedClipId) || activeProject?.clips?.[0];
+  const allClipsSorted = [...(activeProject?.clips || [])].sort((a: any, b: any) => (b.viralityScore || 0) - (a.viralityScore || 0));
+  const activeClip = allClipsSorted.find(c => c.id === selectedClipId) || allClipsSorted[0];
 
   useEffect(() => {
     if (activeClip) {
       const defaultSrc = activeClip.videoUrl || `/clips/clip_${activeClip.id}_9_16_pop.mp4`;
-      setActiveVideoSrc(defaultSrc);
+      if (activeVideoSrc !== defaultSrc) {
+        setActiveVideoSrc(defaultSrc);
+      }
+      if (selectedClipId !== activeClip.id) {
+        setSelectedClipId(activeClip.id);
+      }
     }
-  }, [activeClip]);
+  }, [activeClip, activeVideoSrc, selectedClipId]);
 
   const handleIngestUrl = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,7 +208,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
   }
 
   // Filter clips based on active filter chip
-  const allClips = activeProject?.clips || [];
+  const allClips = allClipsSorted;
   const filteredClips = allClips.filter((c: any) => {
     if (filterCategory === 'high-viral') return (c.viralityScore || 0) >= 90;
     if (filterCategory === 'hooks') return c.reasoning?.toLowerCase().includes('hook') || c.title?.toLowerCase().includes('truth') || c.title?.toLowerCase().includes('rule');
