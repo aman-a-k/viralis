@@ -66,11 +66,11 @@ model Settings {
   instagramAccessToken  String?
 
   // Brand Identity
-  brandName             String?   @default("Automator AI")
+  brandName             String?   @default("Viralis")
   brandNiche            String?   @default("Technology & AI")
-  brandTone             String?   @default("Professional & Engaging")
-  targetAudience        String?   @default("General Tech Enthusiasts")
-  defaultHashtags       String?   @default("ai,tech,trending")
+  brandTone             String?   @default("Punchy & Viral")
+  targetAudience        String?   @default("Social Media Audience")
+  defaultHashtags       String?   @default("viral,shorts,trending,growth")
   
   // Notification Hooks
   discordWebhookUrl     String?
@@ -84,6 +84,77 @@ model Settings {
   videoStyle            String?   @default("Cinematic Stock") // "Cinematic Stock", "AI Art Transitions"
   captionStyle          String?   @default("Dynamic Pop")     // "Dynamic Pop" (Hormozi style), "Minimalist"
   backgroundMusic       String?   @default("Trending Beats")
+}
+
+// Viralis Core Models (Repurposing & Self-Optimizing Distribution)
+model Project {
+  id              String   @id @default(cuid())
+  title           String
+  sourceVideoUrl  String?
+  sourceType      String   @default("upload") // "upload", "youtube", "drive", "zoom"
+  transcript      String?  // Diarized transcript / text
+  duration        Float?   @default(0)
+  status          String   @default("ready")  // "processing", "ready", "failed"
+  metadata        String?  // JSON string
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  clips           Clip[]
+}
+
+model Clip {
+  id                String   @id @default(cuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title             String
+  startTime         Float
+  endTime           Float
+  duration          Float
+  viralityScore     Int      @default(85)
+  reasoning         String
+  aspectRatios      String   @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
+  transcriptSegment String
+  captionVersions   String   // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
+  videoUrl          String?
+  status            String   @default("candidate") // "candidate", "approved", "scheduled", "published", "rejected"
+  createdAt         DateTime @default(now())
+  schedules         Schedule[]
+  metrics           Metric[]
+}
+
+model Schedule {
+  id            String    @id @default(cuid())
+  clipId        String?
+  clip          Clip?     @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  platform      String    // "instagram", "youtube", "linkedin", "twitter", "tiktok"
+  scheduledTime DateTime
+  publishedTime DateTime?
+  status        String    @default("pending") // "pending", "published", "failed"
+  postId        String?
+  createdAt     DateTime  @default(now())
+}
+
+model Metric {
+  id              String   @id @default(cuid())
+  clipId          String?
+  clip            Clip?    @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  platform        String
+  views           Int      @default(0)
+  likes           Int      @default(0)
+  shares          Int      @default(0)
+  comments        Int      @default(0)
+  saves           Int      @default(0)
+  watchThroughPct Float    @default(0.0)
+  rootCauseTag    String?  // e.g. "hook too slow", "wrong platform fit", "topic saturation"
+  fetchedAt       DateTime @default(now())
+}
+
+model TrendSignal {
+  id            String   @id @default(cuid())
+  niche         String
+  topic         String
+  trendingScore Int      @default(80)
+  format        String?  // e.g. "contrarian debate", "breakdown", "hook question"
+  detectedAt    DateTime @default(now())
 }
 
 // NextAuth Models

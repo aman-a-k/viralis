@@ -37,30 +37,59 @@ export async function GET() {
       orderBy: { createdAt: 'desc' }
     });
 
+    const projects = await prisma.project.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        clips: {
+          orderBy: { viralityScore: 'desc' },
+          include: { metrics: true },
+        },
+      },
+      take: 10,
+    });
+
+    const totalClipsCount = await prisma.clip.count();
+
     const agents = [
       {
+        id: 'clipper-agent',
+        name: 'Viralis Highlight AI',
+        role: 'NLP Hook Detector',
+        status: 'idle',
+        lastAction: 'Scanned 12 candidate moments for curiosity gaps and peak sentiment.',
+        capabilities: ['Whisper Diarization', 'Hook Scoring', 'Virality Analysis (0-100)']
+      },
+      {
+        id: 'reframe-agent',
+        name: 'AutoReframe & Subtitle Engine',
+        role: 'Visual Editor',
+        status: 'idle',
+        lastAction: 'Ready to burn Hormozi Dynamic Pop subtitles in 9:16 vertical format.',
+        capabilities: ['Face Tracking 9:16', 'Word-by-word Captions', '4K Concat']
+      },
+      {
+        id: 'copy-agent',
+        name: 'Platform Copywriter',
+        role: 'Distribution Strategist',
+        status: 'idle',
+        lastAction: 'Adapted tone matrix for Instagram Reels, Shorts, LinkedIn, X, and TikTok.',
+        capabilities: ['Tone Optimization', 'Hashtag Clusters', 'SEO Metadata']
+      },
+      {
         id: 'trend-agent',
-        name: 'TrendIntelligence',
+        name: 'Trend Radar & Back-Catalog Scout',
         role: 'Researcher',
         status: 'idle',
-        lastAction: 'Waiting for daily trend fetch...',
-        capabilities: ['Google Trends', 'Viral Analysis', 'Niche Discovery']
+        lastAction: 'Monitoring Google Trends & cross-referencing video archive.',
+        capabilities: ['Google Trends', 'Back-Catalog Sourcing', 'Niche Discovery']
       },
       {
-        id: 'content-agent',
-        name: 'CreativeContent',
-        role: 'Strategist',
+        id: 'feedback-agent',
+        name: 'Learning Loop & Healer',
+        role: 'Self-Optimizer',
         status: 'idle',
-        lastAction: 'Ready to write scripts...',
-        capabilities: ['Scriptwriting', 'Hook Optimization', 'Visual Prompting']
-      },
-      {
-        id: 'video-agent',
-        name: 'VideoProduction',
-        role: 'Editor',
-        status: 'idle',
-        lastAction: 'Waiting for script input...',
-        capabilities: ['FFmpeg', 'TTS Generation', 'Captioning']
+        lastAction: 'Ingesting retention curves and re-weighting highlight detection priorities.',
+        capabilities: ['Root-Cause Tagging', 'Dynamic Weight Tuning', 'Audience Analytics']
       }
     ];
 
@@ -68,9 +97,11 @@ export async function GET() {
       success: true,
       data: {
         videos,
+        projects,
+        totalClipsCount,
         stats: {
-          totalGenerated: videos.length,
-          successCount: successVideos.length,
+          totalGenerated: videos.length + totalClipsCount,
+          successCount: successVideos.length + totalClipsCount,
           failedCount: failedVideos.length,
           revenue: analytics.totalRevenue,
           views: analytics.totalViews,
