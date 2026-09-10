@@ -37,10 +37,10 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
 
       <nav className="landing-nav">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Zap size={16} color="#fff" />
+          <div style={{ width: '30px', height: '30px', borderRadius: '9px', background: 'var(--gradient-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 16px -2px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.25)' }}>
+            <Zap size={17} color="#fff" fill="#fff" />
           </div>
-          <span style={{ fontSize: '1.0625rem', fontWeight: 800, letterSpacing: '-0.03em', color: '#fff' }}>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '1.15rem', fontWeight: 700, letterSpacing: '-0.03em', color: '#fff' }}>
             Viralis
           </span>
         </div>
@@ -65,7 +65,7 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button type="button" onClick={onSignIn} className="btn btn-primary" style={{ padding: '0.7rem 1.5rem', fontSize: '0.9375rem' }}>
-                Sign in with Google <ArrowRight size={15} />
+                Get started <ArrowRight size={15} />
               </button>
               <a
                 href="https://github.com/aman-a-k/viralis"

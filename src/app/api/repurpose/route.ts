@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { RepurposingService } from '@/services/repurposingService';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function GET() {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const projects = await prisma.project.findMany({
       orderBy: { createdAt: 'desc' },
@@ -22,6 +26,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const body = await req.json();
     const { title, sourceVideoUrl, sourceType, transcriptText } = body;

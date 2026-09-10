@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { RepurposingService } from '@/services/repurposingService';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function POST(req: Request) {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const body = await req.json();
     const { clipId, aspectRatio = '9:16', captionStyle = 'Dynamic Pop' } = body;

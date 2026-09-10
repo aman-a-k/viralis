@@ -374,8 +374,31 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
         </button>
       </div>
 
+      {/* Empty state */}
+      {projects.length === 0 && (
+        <div className="panel" style={{ padding: '3.5rem 1.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b3a4f0' }}>
+            <Scissors size={20} />
+          </div>
+          <div>
+            <h3 className="section-title" style={{ marginBottom: '0.3rem' }}>No episodes yet</h3>
+            <p className="text-muted" style={{ fontSize: '0.8125rem', maxWidth: '380px' }}>
+              Upload a long-form video or paste a YouTube link. Viralis finds the highlights and cuts vertical clips automatically.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="btn btn-primary">
+              <Upload size={14} /> Upload video
+            </button>
+            <button type="button" onClick={() => setShowImportDrawer(true)} className="btn btn-secondary">
+              <Plus size={14} /> Import link
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* MODE 1: PINTEREST-INSPIRED VISUAL CONTENT BOARD */}
-      {viewMode === 'grid' && (
+      {viewMode === 'grid' && projects.length > 0 && (
         <div className="pinterest-grid">
           {filteredClips.map((clip: any, idx: number) => {
             const isSelected = clip.id === (activeClip?.id || selectedClipId);
@@ -507,7 +530,7 @@ export function RepurposeStudioView({ projects = [], onRefresh }: RepurposeStudi
       )}
 
       {/* MODE 2: PROFESSIONAL 3-COLUMN STUDIO EDITOR */}
-      {viewMode === 'studio' && (
+      {viewMode === 'studio' && projects.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(380px, 1fr) 380px', gap: '1.25rem', alignItems: 'start' }}>
           
           {/* COLUMN 1: Highlights Timeline */}

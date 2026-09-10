@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { RepurposingService } from '@/services/repurposingService';
+import { requireSession } from '@/lib/apiAuth';
 import fs from 'fs';
 import path from 'path';
 
 export async function POST(req: Request) {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const formData = await req.formData();
     const file = formData.get('video') as File | null;

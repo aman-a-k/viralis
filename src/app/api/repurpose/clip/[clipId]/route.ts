@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { FeedbackLoopService } from '@/services/feedbackLoopService';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ clipId: string }> }) {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const { clipId } = await params;
     const body = await req.json();

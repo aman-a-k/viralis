@@ -3,8 +3,12 @@ import { prisma } from '@/lib/prisma';
 import { VideoAgent } from '@/agents/videoAgent';
 import { PublisherAgent } from '@/agents/publisherAgent';
 import { NotificationService } from '@/services/notifications';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function POST(req: Request) {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const { id, action } = await req.json();
 

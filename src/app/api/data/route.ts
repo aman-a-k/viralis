@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function GET() {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const videos = await prisma.video.findMany({
       orderBy: { createdAt: 'desc' }
