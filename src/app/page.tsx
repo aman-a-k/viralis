@@ -14,13 +14,16 @@ import { FeedbackLoopView } from '@/components/FeedbackLoopView';
 import { AgentStatusView } from '@/components/AgentStatusView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
 import { ApprovalQueueView } from '@/components/ApprovalQueueView';
+import { LandingPage } from '@/components/LandingPage';
 import { signIn, signOut, useSession } from 'next-auth/react';
+import { Menu, X } from 'lucide-react';
 
 export default function Dashboard() {
   const { data: session, status: authStatus } = useSession();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [data, setData] = useState<{
     videos: VideoData[];
     projects: ProjectData[];
@@ -156,6 +159,11 @@ export default function Dashboard() {
     }
   };
 
+  const goToTab = (tab: string) => {
+    setActiveTab(tab);
+    setMobileNavOpen(false);
+  };
+
   const handleYoutubeLogin = () => {
     if (!ytClientId || !ytClientSecret) {
       toast.error("Save your GCP Client ID and Client Secret first!");
@@ -164,7 +172,7 @@ export default function Dashboard() {
     window.location.href = '/api/auth/youtube';
   };
 
-  if (loading) {
+  if (loading || authStatus === 'loading') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--background)', gap: '0.75rem' }}>
         <RefreshCw className="animate-spin" size={28} color="var(--primary)" />
@@ -173,7 +181,11 @@ export default function Dashboard() {
     );
   }
 
-  const { 
+  if (authStatus !== 'authenticated') {
+    return <LandingPage onSignIn={() => signIn('google')} />;
+  }
+
+  const {
     videos = [], 
     projects = [],
     totalClipsCount = 0,
@@ -188,6 +200,17 @@ export default function Dashboard() {
       {/* Top Header Bar (YouTube Studio / Meta Style) */}
       <header className="top-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <button
+            type="button"
+            className="btn btn-ghost mobile-nav-toggle"
+            style={{ padding: '0.35rem' }}
+            onClick={() => setMobileNavOpen((v) => !v)}
+            aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileNavOpen}
+          >
+            {mobileNavOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+
           {/* Logo Mark */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -201,7 +224,7 @@ export default function Dashboard() {
           <div style={{ height: '16px', width: '1px', background: 'var(--surface-border)' }}></div>
 
           {/* Workspace Channel Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+          <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', background: 'transparent', border: 'none' }}>
             <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--foreground)' }}>
               Acme Media Studio
             </span>
@@ -209,16 +232,16 @@ export default function Dashboard() {
               PRO
             </span>
             <ChevronDown size={14} color="var(--foreground-subtle)" />
-          </div>
+          </button>
         </div>
 
         {/* Center Search / Command Bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--surface-subtle)', border: '1px solid var(--surface-border)', borderRadius: 'var(--radius-sm)', padding: '0.35rem 0.75rem', width: '360px' }}>
-          <Search size={14} color="var(--foreground-subtle)" />
-          <input 
-            type="text" 
-            placeholder="Search projects, clips, or command..." 
-            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.78125rem', outline: 'none', width: '100%' }}
+        <div className="header-search">
+          <Search size={14} color="var(--foreground-subtle)" aria-hidden="true" />
+          <input
+            type="text"
+            placeholder="Search projects, clips, or command..."
+            aria-label="Search projects, clips, or command"
           />
           <span style={{ fontSize: '0.625rem', color: 'var(--foreground-subtle)', border: '1px solid var(--surface-border)', padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
             ⌘K
@@ -228,19 +251,19 @@ export default function Dashboard() {
         {/* Right Status & Profile Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', padding: '0.25rem 0.65rem', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }}></span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} aria-hidden="true"></span>
             <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#10b981' }}>Pipeline Online</span>
           </div>
 
-          <button type="button" className="btn btn-ghost" style={{ padding: '0.35rem' }}>
+          <button type="button" className="btn btn-ghost" style={{ padding: '0.35rem' }} aria-label="Notifications">
             <Bell size={16} />
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             {authStatus === 'authenticated' && session?.user?.image ? (
-              <img src={session.user.image} alt="User" style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
+              <img src={session.user.image} alt={session.user.name ? `${session.user.name}'s avatar` : 'Your account'} style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
             ) : (
-              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--surface-subtle)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--surface-subtle)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-hidden="true">
                 <UserIcon size={14} color="var(--foreground-muted)" />
               </div>
             )}
@@ -250,23 +273,30 @@ export default function Dashboard() {
 
       {/* Main Workspace Layout */}
       <div className="app-container">
+        {/* Mobile drawer backdrop */}
+        <div
+          className={`sidebar-overlay ${mobileNavOpen ? 'open' : ''}`}
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        ></div>
+
         {/* Sidebar Navigation */}
-        <aside className="sidebar-nav">
+        <aside className={`sidebar-nav ${mobileNavOpen ? 'open' : ''}`} aria-label="Primary">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {/* Group 1: CORE STUDIO */}
             <div>
               <p className="sidebar-section-title">Core Studio</p>
               <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+                <button className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => goToTab('overview')}>
                   <LayoutDashboard size={15} /> Overview
                 </button>
-                <button className={`nav-link ${activeTab === 'repurpose' ? 'active' : ''}`} onClick={() => setActiveTab('repurpose')}>
+                <button className={`nav-link ${activeTab === 'repurpose' ? 'active' : ''}`} onClick={() => goToTab('repurpose')}>
                   <Scissors size={15} /> Repurpose Studio
                   <span className="badge badge-primary" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
                     NEW
                   </span>
                 </button>
-                <button className={`nav-link ${activeTab === 'autopilot' ? 'active' : ''}`} onClick={() => setActiveTab('autopilot')}>
+                <button className={`nav-link ${activeTab === 'autopilot' ? 'active' : ''}`} onClick={() => goToTab('autopilot')}>
                   <Sparkles size={15} /> Autopilot Generator
                 </button>
               </nav>
@@ -276,7 +306,7 @@ export default function Dashboard() {
             <div>
               <p className="sidebar-section-title">Distribution</p>
               <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
+                <button className={`nav-link ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => goToTab('queue')}>
                   <ClipboardCheck size={15} /> Approval Queue
                   {pendingQueueCount > 0 && (
                     <span className="badge badge-warning" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
@@ -284,7 +314,7 @@ export default function Dashboard() {
                     </span>
                   )}
                 </button>
-                <button className={`nav-link ${activeTab === 'content' ? 'active' : ''}`} onClick={() => setActiveTab('content')}>
+                <button className={`nav-link ${activeTab === 'content' ? 'active' : ''}`} onClick={() => goToTab('content')}>
                   <Video size={15} /> Content Library
                 </button>
               </nav>
@@ -294,13 +324,13 @@ export default function Dashboard() {
             <div>
               <p className="sidebar-section-title">Intelligence</p>
               <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'learning-loop' ? 'active' : ''}`} onClick={() => setActiveTab('learning-loop')}>
+                <button className={`nav-link ${activeTab === 'learning-loop' ? 'active' : ''}`} onClick={() => goToTab('learning-loop')}>
                   <Brain size={15} /> Learning Loop
                   <span className="badge badge-success" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
                     AI
                   </span>
                 </button>
-                <button className={`nav-link ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => setActiveTab('trends')}>
+                <button className={`nav-link ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => goToTab('trends')}>
                   <History size={15} /> Trend Radar
                 </button>
               </nav>
@@ -310,10 +340,10 @@ export default function Dashboard() {
             <div>
               <p className="sidebar-section-title">System</p>
               <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>
+                <button className={`nav-link ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => goToTab('agents')}>
                   <Bot size={15} /> AI Agents Fleet
                 </button>
-                <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+                <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => goToTab('settings')}>
                   <Settings size={15} /> Settings
                 </button>
               </nav>
@@ -328,7 +358,7 @@ export default function Dashboard() {
                   <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{session?.user?.name || 'Creator'}</p>
                   <p className="text-subtle" style={{ fontSize: '0.6875rem' }}>Pro Creator Plan</p>
                 </div>
-                <button onClick={() => signOut()} className="btn btn-ghost" style={{ padding: '0.3rem', color: 'var(--foreground-subtle)' }}>
+                <button onClick={() => signOut()} className="btn btn-ghost" style={{ padding: '0.3rem', color: 'var(--foreground-subtle)' }} aria-label="Sign out">
                   <LogOut size={13} />
                 </button>
               </div>
@@ -464,6 +494,7 @@ export default function Dashboard() {
                     </button>
                   </div>
 
+                  <div className="table-scroll">
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -504,6 +535,7 @@ export default function Dashboard() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               )}
 
@@ -521,6 +553,7 @@ export default function Dashboard() {
                     <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No autopilot videos in the catalog yet. Click &quot;Run Autopilot Cycle&quot; to synthesize your first short.</p>
                   </div>
                 ) : (
+                  <div className="table-scroll">
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -548,6 +581,7 @@ export default function Dashboard() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             </div>
