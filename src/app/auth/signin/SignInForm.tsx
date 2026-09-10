@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { Zap, ArrowRight, Loader2 } from "lucide-react";
 
@@ -12,7 +12,6 @@ interface Props {
 }
 
 export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
 
@@ -27,8 +26,8 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
       toast.error(res.error === "CredentialsSignin" ? "Invalid email or password." : res.error);
       return false;
     }
-    router.push(callbackUrl);
-    router.refresh();
+    // full navigation so the new session is picked up cleanly
+    window.location.assign(callbackUrl);
     return true;
   };
 
