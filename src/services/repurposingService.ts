@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { analyzeTranscript, MissingApiKeyError, type AnalyzedClip } from './analyzerService';
 import { fetchYouTubeVideo, isYouTubeUrl } from './youtubeService';
+import { describeLlmError } from '../lib/llm';
 
 export interface IngestOptions {
   title?: string;
@@ -71,7 +72,7 @@ export class RepurposingService {
       });
       return { project: updated, clips };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Analysis failed.';
+      const message = err instanceof MissingApiKeyError ? err.message : describeLlmError(err);
       await prisma.project.update({
         where: { id: project.id },
         data: { status: 'failed', errorMessage: message },
@@ -118,7 +119,7 @@ export class RepurposingService {
       const updated = await prisma.project.update({ where: { id: project.id }, data: { status: 'ready' } });
       return { project: updated, clips };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Analysis failed.';
+      const message = err instanceof MissingApiKeyError ? err.message : describeLlmError(err);
       await prisma.project.update({ where: { id: project.id }, data: { status: 'failed', errorMessage: message } });
       throw new Error(message);
     }

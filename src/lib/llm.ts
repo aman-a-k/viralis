@@ -84,8 +84,25 @@ export async function getLlmClient(): Promise<LlmClient> {
   const model = settings?.aiModel || process.env.AI_MODEL || cfg.defaultModel;
 
   return {
-    client: new OpenAI({ apiKey: key, baseURL: cfg.baseURL }),
+    client: new OpenAI({
+      apiKey: key,
+      baseURL: cfg.baseURL,
+      maxRetries: 4, // SDK backs off on 429/503
+      timeout: 60_000,
+    }),
     model,
     provider,
   };
+}
+
+/** Human-friendly message for the common LLM failures. */
+export function describeLlmError(err: unknown): string {
+  const status = (err as { status?: number })?.status;
+  if (status === 429)
+    return 'The AI provider is rate-limiting requests (free tiers are ~10–15/min). Wait a minute and try again.';
+  if (status === 503 || status === 500)
+    return 'The AI provider is temporarily overloaded. Try again in a moment.';
+  if (status === 401 || status === 403)
+    return 'The AI API key was rejected. Check it in Settings.';
+  return err instanceof Error ? err.message : 'AI request failed.';
 }
