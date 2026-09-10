@@ -98,11 +98,14 @@ export async function getLlmClient(): Promise<LlmClient> {
 /** Human-friendly message for the common LLM failures. */
 export function describeLlmError(err: unknown): string {
   const status = (err as { status?: number })?.status;
-  if (status === 429)
-    return 'The AI provider is rate-limiting requests (free tiers are ~10–15/min). Wait a minute and try again.';
-  if (status === 503 || status === 500)
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  const has = (code: number) => status === code || new RegExp(`\\b${code}\\b`).test(msg);
+
+  if (has(429))
+    return "The AI provider hit its rate/quota limit. Free tiers allow ~10–15 requests/min and a daily cap — wait a bit, or switch provider in Settings.";
+  if (has(503) || has(500))
     return 'The AI provider is temporarily overloaded. Try again in a moment.';
-  if (status === 401 || status === 403)
+  if (has(401) || has(403))
     return 'The AI API key was rejected. Check it in Settings.';
-  return err instanceof Error ? err.message : 'AI request failed.';
+  return msg || 'AI request failed.';
 }

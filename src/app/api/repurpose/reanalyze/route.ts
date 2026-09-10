@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { describeLlmError } from '@/lib/llm';
 import { RepurposingService } from '@/services/repurposingService';
 import { requireSession } from '@/lib/apiAuth';
 
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     console.error('[API /api/repurpose/reanalyze] Error:', error);
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
+      { success: false, error: describeLlmError(error) },
       { status: 500 }
     );
   }
