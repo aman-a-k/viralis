@@ -686,7 +686,7 @@ export default function Dashboard() {
                         type="text"
                         value={aiModel}
                         onChange={(e) => setAiModel(e.target.value)}
-                        placeholder={aiProvider === 'gemini' ? 'gemini-2.0-flash' : aiProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'}
+                        placeholder={aiProvider === 'gemini' ? 'gemini-flash-latest' : aiProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'}
                         className="input-field"
                       />
                     </div>

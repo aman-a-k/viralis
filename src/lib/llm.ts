@@ -29,7 +29,7 @@ export const PROVIDERS: Record<AiProvider, ProviderConfig> = {
   },
   gemini: {
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gemini-flash-latest',
     keyEnv: 'GEMINI_API_KEY',
     label: 'Google Gemini (free)',
     getKeyUrl: 'https://aistudio.google.com/apikey',
