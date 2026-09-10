@@ -31,30 +31,33 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { title, sourceVideoUrl, sourceType, transcriptText } = body;
+    const { title, sourceVideoUrl, transcriptText, clipCount } = body;
 
-    if (!title && !sourceVideoUrl) {
+    if (!sourceVideoUrl && !transcriptText) {
       return NextResponse.json(
-        { success: false, error: 'Please provide a title or a video URL.' },
+        { success: false, error: 'Paste a YouTube link or a full transcript.' },
         { status: 400 }
       );
     }
 
     const result = await RepurposingService.ingestVideo({
-      title: title || 'Repurposed Masterclass',
+      title,
       sourceVideoUrl,
-      sourceType: sourceType || (sourceVideoUrl ? 'youtube' : 'upload'),
       transcriptText,
+      desiredClipCount: Math.min(10, Math.max(3, Number(clipCount) || 5)),
     });
 
     return NextResponse.json({
       success: true,
       project: result.project,
       clips: result.clips,
-      message: `Extracted ${result.clips.length} high-virality highlights from video.`,
+      message: `Analyzed "${result.project.title}" — surfaced ${result.clips.length} clips.`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API /api/repurpose POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
 }

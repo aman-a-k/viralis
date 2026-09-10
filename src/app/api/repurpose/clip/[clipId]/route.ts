@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { FeedbackLoopService } from '@/services/feedbackLoopService';
 import { requireSession } from '@/lib/apiAuth';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ clipId: string }> }) {
@@ -53,12 +52,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ clipId
         data: { status: 'approved' },
       });
 
-      // Simulate performance metrics for the feedback loop
-      await FeedbackLoopService.simulateOrganicMetrics(clip.id, clip.viralityScore);
-
       return NextResponse.json({
         success: true,
-        message: 'Clip sent to Unified Approval Queue with multi-platform copy.',
+        message: 'Clip sent to the approval queue with multi-platform copy.',
       });
     }
 
