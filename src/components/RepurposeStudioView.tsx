@@ -90,7 +90,8 @@ export function RepurposeStudioView({ projects = [], onRefresh }: Props) {
         setSelectedProjectId(data.project.id);
         onRefresh();
       } else {
-        toast.error(data.error || 'Analysis failed', { id: 'an', duration: 6000 });
+        toast.error(data.error || 'Analysis failed', { id: 'an', duration: 7000 });
+        onRefresh(); // a failed project may have been created — surface it
       }
     } catch {
       toast.error('Network error contacting the analyzer.', { id: 'an' });
