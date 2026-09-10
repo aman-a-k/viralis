@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { Zap, Scissors, Sparkles, Brain, ClipboardCheck, ArrowRight, Github } from 'lucide-react';
+import { Zap, Scissors, Sparkles, Brain, ClipboardCheck, ArrowRight, ExternalLink } from 'lucide-react';
 
 interface LandingPageProps {
   onSignIn: () => void;
@@ -74,7 +74,7 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
                 className="btn btn-secondary"
                 style={{ padding: '0.7rem 1.5rem', fontSize: '0.9375rem' }}
               >
-                <Github size={15} /> View on GitHub
+                <ExternalLink size={15} /> View on GitHub
               </a>
             </div>
           </div>
@@ -123,7 +123,7 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
           rel="noopener noreferrer"
           style={{ color: 'var(--foreground-subtle)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
         >
-          <Github size={14} /> Source
+          <ExternalLink size={14} /> Source
         </a>
       </footer>
     </div>
