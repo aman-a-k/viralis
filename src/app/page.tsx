@@ -40,7 +40,10 @@ export default function Dashboard() {
   // Settings State
   const [ytId, setYtId] = useState('');
   const [igId, setIgId] = useState('');
-  const [openAi, setOpenAi] = useState('');
+  const [aiProvider, setAiProvider] = useState('gemini');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [hasAiKey, setHasAiKey] = useState(false);
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSecret, setYtClientSecret] = useState('');
   const [igAccessToken, setIgAccessToken] = useState('');
@@ -68,7 +71,9 @@ export default function Dashboard() {
         if (json.data.settings) {
           setYtId(json.data.settings.youtubeId || '');
           setIgId(json.data.settings.instagramId || '');
-          setOpenAi(json.data.settings.openAiKey || '');
+          setAiProvider(json.data.settings.aiProvider || 'gemini');
+          setAiModel(json.data.settings.aiModel || '');
+          setHasAiKey(!!json.data.settings.hasAiKey);
           setYtClientId(json.data.settings.youtubeClientId || '');
           setYtClientSecret(json.data.settings.youtubeClientSecret || '');
           setIgAccessToken(json.data.settings.instagramAccessToken || '');
@@ -139,7 +144,9 @@ export default function Dashboard() {
         body: JSON.stringify({ 
           youtubeId: ytId, 
           instagramId: igId, 
-          openAiKey: openAi,
+          aiProvider,
+          aiApiKey: aiApiKey || undefined,
+          aiModel: aiModel || undefined,
           youtubeClientId: ytClientId,
           youtubeClientSecret: ytClientSecret,
           instagramAccessToken: igAccessToken,
@@ -643,13 +650,53 @@ export default function Dashboard() {
           {activeTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {/* OpenAI Section */}
+                {/* AI Engine */}
                 <div className="panel-card">
-                  <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, marginBottom: '0.75rem' }}>OpenAI Key & Intelligence Engine</h3>
-                  <div className="form-group">
-                    <label className="form-label">OpenAI API Key (Powers Highlight Scoring, Transcript NLP, and Scriptwriting)</label>
-                    <input type="password" value={openAi} onChange={(e) => setOpenAi(e.target.value)} placeholder="sk-..." className="input-field" />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.9rem' }}>
+                    <h3 className="section-title">AI Engine</h3>
+                    <span className={`badge ${hasAiKey ? 'badge-success' : 'badge-warning'}`}>
+                      {hasAiKey ? 'Key set' : 'No key'}
+                    </span>
                   </div>
+                  <p className="text-muted" style={{ fontSize: '0.8125rem', marginBottom: '1rem' }}>
+                    Powers highlight detection, per-platform copy, and trend analysis. Gemini and Groq both have a free tier with no card.
+                  </p>
+                  <div className="grid-cols-3">
+                    <div className="form-group">
+                      <label className="form-label">Provider</label>
+                      <select className="input-field" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
+                        <option value="gemini">Google Gemini — free</option>
+                        <option value="groq">Groq — free</option>
+                        <option value="openai">OpenAI — paid</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">API key</label>
+                      <input
+                        type="password"
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                        placeholder={hasAiKey ? '•••••••• (saved — leave blank to keep)' : 'Paste key'}
+                        className="input-field"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Model (optional)</label>
+                      <input
+                        type="text"
+                        value={aiModel}
+                        onChange={(e) => setAiModel(e.target.value)}
+                        placeholder={aiProvider === 'gemini' ? 'gemini-2.0-flash' : aiProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'}
+                        className="input-field"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.75rem' }}>
+                    Get a free key:{' '}
+                    {aiProvider === 'gemini' && <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>aistudio.google.com/apikey</a>}
+                    {aiProvider === 'groq' && <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>console.groq.com/keys</a>}
+                    {aiProvider === 'openai' && <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>platform.openai.com/api-keys</a>}
+                  </p>
                 </div>
 
                 {/* Platform Connections */}

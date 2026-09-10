@@ -40,8 +40,6 @@ export class RepurposingService {
   }
 
   static async ingestYouTube(url: string, desiredClipCount = 5) {
-    const apiKey = await this.getOpenAiKey();
-
     const video = await fetchYouTubeVideo(url);
 
     const project = await prisma.project.create({
@@ -65,7 +63,7 @@ export class RepurposingService {
     });
 
     try {
-      const highlights = await analyzeTranscript(video, apiKey, desiredClipCount);
+      const highlights = await analyzeTranscript(video, desiredClipCount);
       const clips = await this.persistClips(project.id, highlights);
       const updated = await prisma.project.update({
         where: { id: project.id },
@@ -80,14 +78,13 @@ export class RepurposingService {
       });
       throw new Error(
         err instanceof MissingApiKeyError
-          ? 'Fetched the transcript, but no OpenAI key is configured. Add one in Settings to run the analysis.'
+          ? `Fetched the transcript for "${video.title}", but ${message}`
           : message
       );
     }
   }
 
   static async ingestPastedTranscript(title: string, text: string, desiredClipCount = 5) {
-    const apiKey = await this.getOpenAiKey();
 
     // Build a single-segment transcript so the analyzer has something to work with.
     const approxDuration = Math.max(120, Math.round(text.split(/\s+/).length / 2.5));
@@ -116,7 +113,7 @@ export class RepurposingService {
     });
 
     try {
-      const highlights = await analyzeTranscript(video, apiKey, desiredClipCount);
+      const highlights = await analyzeTranscript(video, desiredClipCount);
       const clips = await this.persistClips(project.id, highlights);
       const updated = await prisma.project.update({ where: { id: project.id }, data: { status: 'ready' } });
       return { project: updated, clips };
@@ -152,11 +149,6 @@ export class RepurposingService {
     return created;
   }
 
-  private static async getOpenAiKey(): Promise<string | null> {
-    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-    return settings?.openAiKey || process.env.OPENAI_API_KEY || null;
-  }
-
   /**
    * Re-run analysis on an existing project's stored transcript (e.g. after the
    * user adds an API key, or wants a different number of clips).
@@ -166,7 +158,6 @@ export class RepurposingService {
     if (!project) throw new Error('Project not found.');
     if (!project.transcriptJson) throw new Error('This project has no stored transcript to re-analyze.');
 
-    const apiKey = await this.getOpenAiKey();
     const segments = JSON.parse(project.transcriptJson);
     const video = {
       videoId: project.sourceVideoId || '',
@@ -181,7 +172,7 @@ export class RepurposingService {
       transcriptSource: 'captions' as const,
     };
 
-    const highlights = await analyzeTranscript(video, apiKey, desiredClipCount);
+    const highlights = await analyzeTranscript(video, desiredClipCount);
     await prisma.clip.deleteMany({ where: { projectId, status: 'candidate' } });
     const clips = await this.persistClips(projectId, highlights);
     await prisma.project.update({ where: { id: projectId }, data: { status: 'ready', errorMessage: null } });

@@ -56,7 +56,12 @@ model Settings {
   id                    String   @id @default("default")
   youtubeId             String?
   instagramId           String?
-  openAiKey             String?
+  openAiKey             String?   // legacy — see aiApiKey
+
+  // AI provider (OpenAI-compatible). provider: "openai" | "gemini" | "groq"
+  aiProvider            String?   @default("gemini")
+  aiApiKey              String?
+  aiModel               String?
   
   // YouTube OAuth
   youtubeClientId       String?

@@ -8,11 +8,14 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { 
-        youtubeId, instagramId, openAiKey, youtubeClientId, youtubeClientSecret, 
-        instagramAccessToken, brandName, brandNiche, brandTone, targetAudience, 
-        discordWebhookUrl, pexelsApiKey, elevenLabsApiKey, pixabayApiKey, videoStyle, captionStyle 
+    const {
+        youtubeId, instagramId, openAiKey, youtubeClientId, youtubeClientSecret,
+        instagramAccessToken, brandName, brandNiche, brandTone, targetAudience,
+        discordWebhookUrl, pexelsApiKey, elevenLabsApiKey, pixabayApiKey, videoStyle, captionStyle,
+        aiProvider, aiApiKey, aiModel
     } = body;
+
+    const normalizedProvider = ['openai', 'gemini', 'groq'].includes(aiProvider) ? aiProvider : undefined;
 
     const settings = await prisma.settings.upsert({
       where: { id: 'default' },
@@ -20,6 +23,9 @@ export async function POST(req: Request) {
         youtubeId: youtubeId || null,
         instagramId: instagramId || null,
         openAiKey: openAiKey || null,
+        aiProvider: normalizedProvider ?? undefined,
+        aiApiKey: aiApiKey !== undefined ? (aiApiKey || null) : undefined,
+        aiModel: aiModel !== undefined ? (aiModel || null) : undefined,
         youtubeClientId: youtubeClientId || null,
         youtubeClientSecret: youtubeClientSecret || null,
         instagramAccessToken: instagramAccessToken || null,
@@ -39,6 +45,9 @@ export async function POST(req: Request) {
         youtubeId: youtubeId || null,
         instagramId: instagramId || null,
         openAiKey: openAiKey || null,
+        aiProvider: normalizedProvider ?? 'gemini',
+        aiApiKey: aiApiKey || null,
+        aiModel: aiModel || null,
         youtubeClientId: youtubeClientId || null,
         youtubeClientSecret: youtubeClientSecret || null,
         instagramAccessToken: instagramAccessToken || null

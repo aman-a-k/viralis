@@ -114,8 +114,11 @@ export async function GET() {
         },
         settings: {
           instagramId: settings.instagramId || '',
-          hasOpenAi: !!settings.openAiKey,
-          openAiKey: settings.openAiKey || '',
+          aiProvider: (settings as { aiProvider?: string }).aiProvider || 'gemini',
+          hasAiKey: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          aiModel: (settings as { aiModel?: string }).aiModel || '',
+          hasOpenAi: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          openAiKey: '',
           youtubeClientId: settings.youtubeClientId || '',
           youtubeClientSecret: settings.youtubeClientSecret || '',
           hasYoutubeAuth: !!settings.youtubeRefreshToken,

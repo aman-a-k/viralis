@@ -1,11 +1,13 @@
-import OpenAI from 'openai';
 import type { PlatformCaptions } from '../types';
+import { getLlmClient, MissingApiKeyError } from '../lib/llm';
 import {
   type YouTubeVideoData,
   transcriptToPromptText,
   transcriptSlice,
   formatTimestamp,
 } from './youtubeService';
+
+export { MissingApiKeyError };
 
 export interface AnalyzedClip {
   title: string;
@@ -25,13 +27,6 @@ const EMPTY_CAPTIONS: PlatformCaptions = {
   twitter: '',
   tiktok: '',
 };
-
-export class MissingApiKeyError extends Error {
-  constructor() {
-    super('OpenAI API key required. Add it in Settings or set OPENAI_API_KEY.');
-    this.name = 'MissingApiKeyError';
-  }
-}
 
 function clampClip(raw: any, duration: number): AnalyzedClip | null {
   let start = Number(raw?.startTime ?? raw?.start ?? NaN);
@@ -72,12 +67,9 @@ function clampClip(raw: any, duration: number): AnalyzedClip | null {
  */
 export async function analyzeTranscript(
   video: YouTubeVideoData,
-  apiKey: string | null | undefined,
   desiredCount = 5
 ): Promise<AnalyzedClip[]> {
-  if (!apiKey) throw new MissingApiKeyError();
-
-  const openai = new OpenAI({ apiKey });
+  const { client, model } = await getLlmClient();
   const transcriptText = transcriptToPromptText(video.transcript, 13000);
 
   const system =
@@ -102,8 +94,8 @@ Find the ${desiredCount} strongest standalone clips (each 15–60 seconds). For 
 
 Return JSON exactly: { "clips": [ { ... } ] }  — ordered by viralityScore descending.`;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+  const response = await client.chat.completions.create({
+    model,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
@@ -117,7 +109,10 @@ Return JSON exactly: { "clips": [ { ... } ] }  — ordered by viralityScore desc
   try {
     parsed = JSON.parse(content);
   } catch {
-    throw new Error('The analysis model returned malformed output. Try again.');
+    // some models wrap JSON in prose or fences
+    const m = content.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('The analysis model returned malformed output. Try again.');
+    parsed = JSON.parse(m[0]);
   }
 
   const rawClips: any[] = Array.isArray(parsed) ? parsed : parsed.clips || parsed.highlights || [];
