@@ -68,6 +68,13 @@ model Settings {
   youtubeClientSecret   String?
   youtubeRefreshToken   String?
 
+  // YouTube Data API (trending discovery — separate from the OAuth upload creds above)
+  youtubeDataApiKey     String?
+
+  // Repurpose defaults (JSON string arrays)
+  defaultPlatforms      String?   @default("[\"instagram\",\"youtube\",\"linkedin\",\"twitter\",\"tiktok\"]")
+  defaultOrientations   String?   @default("[\"9:16\",\"1:1\",\"16:9\"]")
+
   // Instagram Graph API
   instagramAccessToken  String?
 

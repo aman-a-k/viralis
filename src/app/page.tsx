@@ -62,6 +62,12 @@ export default function Dashboard() {
   const [videoStyle, setVideoStyle] = useState('Cinematic Stock');
   const [captionStyle, setCaptionStyle] = useState('Dynamic Pop');
 
+  // Trending discovery
+  const [youtubeDataApiKey, setYoutubeDataApiKey] = useState('');
+  const [hasYoutubeDataKey, setHasYoutubeDataKey] = useState(false);
+  const [defaultPlatforms, setDefaultPlatforms] = useState<string[]>(['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok']);
+  const [defaultOrientations, setDefaultOrientations] = useState<string[]>(['9:16', '1:1', '16:9']);
+
   const fetchData = async () => {
     try {
       const res = await fetch('/api/data');
@@ -87,6 +93,14 @@ export default function Dashboard() {
           setPixabayKey(json.data.settings.pixabayApiKey || '');
           setVideoStyle(json.data.settings.videoStyle || 'Cinematic Stock');
           setCaptionStyle(json.data.settings.captionStyle || 'Dynamic Pop');
+          setHasYoutubeDataKey(!!json.data.settings.hasYoutubeDataKey);
+          if (json.data.settings.brandNiche) setBrandNiche(json.data.settings.brandNiche);
+          if (Array.isArray(json.data.settings.defaultPlatforms) && json.data.settings.defaultPlatforms.length) {
+            setDefaultPlatforms(json.data.settings.defaultPlatforms);
+          }
+          if (Array.isArray(json.data.settings.defaultOrientations) && json.data.settings.defaultOrientations.length) {
+            setDefaultOrientations(json.data.settings.defaultOrientations);
+          }
         }
       }
     } catch (e) {
@@ -159,7 +173,10 @@ export default function Dashboard() {
           elevenLabsApiKey: elevenLabsKey,
           pixabayApiKey: pixabayKey,
           videoStyle,
-          captionStyle
+          captionStyle,
+          youtubeDataApiKey: youtubeDataApiKey || undefined,
+          defaultPlatforms,
+          defaultOrientations,
         })
       });
       const responseData = await res.json();
@@ -570,7 +587,13 @@ export default function Dashboard() {
 
           {/* REPURPOSE STUDIO TAB */}
           {activeTab === 'repurpose' && (
-            <RepurposeStudioView projects={projects} onRefresh={fetchData} />
+            <RepurposeStudioView
+              projects={projects}
+              onRefresh={fetchData}
+              defaultPlatforms={defaultPlatforms}
+              defaultOrientations={defaultOrientations}
+              defaultCaptionStyle={captionStyle}
+            />
           )}
 
           {/* AUTOPILOT GENERATOR TAB */}
@@ -697,6 +720,65 @@ export default function Dashboard() {
                     {aiProvider === 'groq' && <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>console.groq.com/keys</a>}
                     {aiProvider === 'openai' && <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>platform.openai.com/api-keys</a>}
                   </p>
+                </div>
+
+                {/* Trending Discovery */}
+                <div className="panel-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.9rem' }}>
+                    <h3 className="section-title">Trending Discovery</h3>
+                    <span className={`badge ${hasYoutubeDataKey ? 'badge-success' : 'badge-warning'}`}>
+                      {hasYoutubeDataKey ? 'Key set' : 'No key'}
+                    </span>
+                  </div>
+                  <p className="text-muted" style={{ fontSize: '0.8125rem', marginBottom: '1rem' }}>
+                    Powers the trending-video list in Repurpose Studio. Free — no card required.
+                  </p>
+                  <div className="form-group" style={{ maxWidth: 440 }}>
+                    <label className="form-label">YouTube Data API Key</label>
+                    <input
+                      type="password"
+                      value={youtubeDataApiKey}
+                      onChange={(e) => setYoutubeDataApiKey(e.target.value)}
+                      placeholder={hasYoutubeDataKey ? '•••••••• (saved — leave blank to keep)' : 'AIza...'}
+                      className="input-field"
+                    />
+                  </div>
+                  <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.6rem' }}>
+                    Get a free key: <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>console.cloud.google.com</a> — enable &quot;YouTube Data API v3&quot;, then create an API key under Credentials.
+                  </p>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1.1rem' }}>
+                    <span className="form-label">Default platforms</span>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {(['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok'] as const).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setDefaultPlatforms((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p])}
+                          className={`filter-chip ${defaultPlatforms.includes(p) ? 'active' : ''}`}
+                          style={{ textTransform: 'capitalize' }}
+                        >
+                          {p === 'twitter' ? 'X' : p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.9rem' }}>
+                    <span className="form-label">Default orientations</span>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {(['9:16', '1:1', '16:9'] as const).map((o) => (
+                        <button
+                          key={o}
+                          type="button"
+                          onClick={() => setDefaultOrientations((prev) => prev.includes(o) ? prev.filter((x) => x !== o) : [...prev, o])}
+                          className={`filter-chip ${defaultOrientations.includes(o) ? 'active' : ''}`}
+                        >
+                          {o}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Platform Connections */}

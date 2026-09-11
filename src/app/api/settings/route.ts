@@ -12,7 +12,7 @@ export async function POST(req: Request) {
         youtubeId, instagramId, openAiKey, youtubeClientId, youtubeClientSecret,
         instagramAccessToken, brandName, brandNiche, brandTone, targetAudience,
         discordWebhookUrl, pexelsApiKey, elevenLabsApiKey, pixabayApiKey, videoStyle, captionStyle,
-        aiProvider, aiApiKey, aiModel
+        aiProvider, aiApiKey, aiModel, youtubeDataApiKey, defaultPlatforms, defaultOrientations
     } = body;
 
     const normalizedProvider = ['openai', 'gemini', 'groq'].includes(aiProvider) ? aiProvider : undefined;
@@ -38,7 +38,10 @@ export async function POST(req: Request) {
         elevenLabsApiKey: elevenLabsApiKey || null,
         pixabayApiKey: pixabayApiKey || null,
         videoStyle: videoStyle || null,
-        captionStyle: captionStyle || null
+        captionStyle: captionStyle || null,
+        youtubeDataApiKey: youtubeDataApiKey !== undefined ? (youtubeDataApiKey || null) : undefined,
+        defaultPlatforms: Array.isArray(defaultPlatforms) ? JSON.stringify(defaultPlatforms) : undefined,
+        defaultOrientations: Array.isArray(defaultOrientations) ? JSON.stringify(defaultOrientations) : undefined,
       },
       create: {
         id: 'default',
@@ -50,7 +53,10 @@ export async function POST(req: Request) {
         aiModel: aiModel || null,
         youtubeClientId: youtubeClientId || null,
         youtubeClientSecret: youtubeClientSecret || null,
-        instagramAccessToken: instagramAccessToken || null
+        instagramAccessToken: instagramAccessToken || null,
+        youtubeDataApiKey: youtubeDataApiKey || null,
+        defaultPlatforms: Array.isArray(defaultPlatforms) ? JSON.stringify(defaultPlatforms) : undefined,
+        defaultOrientations: Array.isArray(defaultOrientations) ? JSON.stringify(defaultOrientations) : undefined,
       }
     });
 
