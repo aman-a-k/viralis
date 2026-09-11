@@ -31,6 +31,12 @@ model ApprovalQueue {
   status          String   @default("pending") // "pending", "approved", "rejected"
   rejectionReason String?
   createdAt       DateTime @default(now())
+
+  // Links back to the repurposed Clip this entry came from (unset for
+  // Autopilot-generated scripts, which have no source clip to cut).
+  clipId          String?
+  renderStatus    String?  // null | "pending" | "rendering" | "rendered" | "failed"
+  renderError     String?
 }
 
 model Trend {
