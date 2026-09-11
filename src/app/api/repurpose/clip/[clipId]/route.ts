@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/apiAuth';
+import { RepurposingService } from '@/services/repurposingService';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ clipId: string }> }) {
   const auth = await requireSession();
@@ -21,36 +22,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ clipId
     }
 
     if (action === 'approve_to_queue') {
-      // Add to ApprovalQueue model so it unifies with Autopilot videos
-      let parsedCaptions: any = {};
-      try {
-        parsedCaptions = JSON.parse(clip.captionVersions);
-      } catch (e) {
-        parsedCaptions = { instagram: clip.captionVersions };
-      }
-
-      await prisma.approvalQueue.create({
-        data: {
-          topic: `[Repurposed] ${clip.title}`,
-          script: clip.transcriptSegment,
-          visualPrompts: JSON.stringify([
-            `9:16 vertical reframe with face-tracking`,
-            `Hormozi dynamic pop subtitles: ${clip.title}`,
-          ]),
-          captions: JSON.stringify([
-            { startTime: 0, endTime: clip.duration, text: clip.transcriptSegment.slice(0, 100) },
-          ]),
-          seoTitle: parsedCaptions.youtube?.slice(0, 80) || clip.title,
-          seoDescription: parsedCaptions.linkedin || parsedCaptions.instagram || clip.reasoning,
-          seoTags: JSON.stringify(['shorts', 'viral', 'repurpose', 'clips']),
-          status: 'pending',
-        },
-      });
-
-      await prisma.clip.update({
-        where: { id: clipId },
-        data: { status: 'approved' },
-      });
+      await RepurposingService.queueClip(clipId);
 
       return NextResponse.json({
         success: true,

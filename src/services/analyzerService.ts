@@ -60,6 +60,15 @@ function clampClip(raw: any, duration: number): AnalyzedClip | null {
   };
 }
 
+export interface AnalyzeOptions {
+  /** Which platforms to write captions for. Defaults to all five. */
+  platforms?: string[];
+  /** "Dynamic Pop" (punchy, emoji, Hormozi-style) or "Minimalist" (clean, few/no emoji). */
+  captionStyle?: string;
+}
+
+const ALL_PLATFORMS = ['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok'];
+
 /**
  * Runs real highlight detection over a real transcript.
  * Timestamps are clamped to the video and the transcript segment is
@@ -67,10 +76,20 @@ function clampClip(raw: any, duration: number): AnalyzedClip | null {
  */
 export async function analyzeTranscript(
   video: YouTubeVideoData,
-  desiredCount = 5
+  desiredCount = 5,
+  options: AnalyzeOptions = {}
 ): Promise<AnalyzedClip[]> {
   const { client, model } = await getLlmClient();
   const transcriptText = transcriptToPromptText(video.transcript, 13000);
+
+  const platforms = (options.platforms?.length ? options.platforms : ALL_PLATFORMS).filter((p) =>
+    ALL_PLATFORMS.includes(p)
+  );
+  const captionStyle = options.captionStyle === 'Minimalist' ? 'Minimalist' : 'Dynamic Pop';
+  const toneNote =
+    captionStyle === 'Minimalist'
+      ? 'Keep captions clean and minimal — short sentences, little to no emoji, no hashtag spam (0-3 relevant tags max).'
+      : 'Keep captions punchy and high-energy — pattern interrupts, tasteful emoji, a hook line first, hashtags where the platform expects them.';
 
   const system =
     'You are Viralis, an expert short-form video editor. You find the moments in a long-form ' +
@@ -90,7 +109,7 @@ Find the ${desiredCount} strongest standalone clips (each 15–60 seconds). For 
 - viralityScore: 1–100, how likely this clip is to over-perform
 - hookType: one of "contrarian", "framework", "story", "data", "question", "howto", "controversy"
 - reasoning: 1–2 sentences on why this moment works (be specific about the hook)
-- captions: object with keys instagram, youtube, linkedin, twitter, tiktok — each a ready-to-post caption written natively for that platform (hashtags where appropriate, no cross-posting the same text)
+- captions: object with keys ${platforms.join(', ')} — each a ready-to-post caption written natively for that platform. ${toneNote}
 
 Return JSON exactly: { "clips": [ { ... } ] }  — ordered by viralityScore descending.`;
 
