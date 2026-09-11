@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { analyzeTranscript, MissingApiKeyError, type AnalyzedClip, type AnalyzeOptions } from './analyzerService';
 import { fetchYouTubeVideo, isYouTubeUrl } from './youtubeService';
 import { describeLlmError } from '../lib/llm';
+import { renderClipOnWorker } from '../lib/renderWorker';
 
 export interface RunConfig {
   /** Platforms to generate captions for. Defaults to all five. */
@@ -226,6 +227,8 @@ export class RepurposingService {
         seoDescription: parsedCaptions.linkedin || parsedCaptions.instagram || clip.reasoning,
         seoTags: JSON.stringify(['shorts', 'viral', 'repurpose', 'clips']),
         status: 'pending',
+        clipId: clip.id,
+        renderStatus: 'pending',
       },
     });
 
@@ -233,11 +236,34 @@ export class RepurposingService {
     return clip;
   }
 
-  /** Video rendering is not available on this deployment (needs the media worker). */
-  static async renderClip(): Promise<never> {
-    throw new Error(
-      'Clip rendering runs on the media worker, which is not enabled here. Use the timestamps and captions to cut the clip, or connect a worker.'
-    );
+  /**
+   * Cuts the real clip via the standalone render worker (see /worker) and
+   * saves the resulting video URL. Throws RenderWorkerNotConfiguredError if
+   * the worker isn't wired up yet.
+   */
+  static async renderClip(
+    clipId: string,
+    aspectRatio: '9:16' | '1:1' | '16:9' = '9:16',
+    captionStyle: string = 'Dynamic Pop'
+  ): Promise<string> {
+    const clip = await prisma.clip.findUnique({ where: { id: clipId }, include: { project: true } });
+    if (!clip) throw new Error('Clip not found.');
+    if (!clip.project.sourceVideoUrl || clip.project.sourceType !== 'youtube') {
+      throw new Error('This clip has no YouTube source to render from (it came from a pasted transcript).');
+    }
+
+    const videoUrl = await renderClipOnWorker({
+      clipId: clip.id,
+      youtubeUrl: clip.project.sourceVideoUrl,
+      startTime: clip.startTime,
+      endTime: clip.endTime,
+      aspectRatio,
+      captionText: clip.transcriptSegment,
+      captionStyle,
+    });
+
+    await prisma.clip.update({ where: { id: clipId }, data: { videoUrl } });
+    return videoUrl;
   }
 }
 

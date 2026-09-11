@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { NotificationService } from '@/services/notifications';
 import { requireSession } from '@/lib/apiAuth';
+import { RepurposingService } from '@/services/repurposingService';
+import { renderWorkerConfigured } from '@/lib/renderWorker';
+
+// Rendering (when the worker is connected) can take a while.
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   const auth = await requireSession();
@@ -21,27 +26,35 @@ export async function POST(req: Request) {
 
       await prisma.approvalQueue.update({ where: { id }, data: { status: 'approved' } });
 
-      // The script + metadata are approved. Rendering the actual MP4 and
-      // publishing run on the media worker (not part of this deployment), so we
-      // record the video as pending render rather than shelling out to ffmpeg.
-      await prisma.video.create({
-        data: {
-          topic: item.topic,
-          videoUrl: '',
-          platform: 'both',
-          status: 'pending',
-        },
-      });
+      // Repurposed clips (item.clipId set): render the real cut if the
+      // worker is connected. Autopilot-generated scripts have no source
+      // clip to cut — those just move to "pending" until a worker exists.
+      if (item.clipId && renderWorkerConfigured()) {
+        try {
+          await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'rendering' } });
+          const videoUrl = await RepurposingService.renderClip(item.clipId, '9:16', 'Dynamic Pop');
+          await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'rendered' } });
+          await NotificationService.sendDiscordNotification('Clip rendered', `"${item.topic}" has a real cut ready.`, 'success');
+          return NextResponse.json({ success: true, message: 'Approved and rendered — the real clip is ready.', videoUrl });
+        } catch (renderErr) {
+          const message = renderErr instanceof Error ? renderErr.message : 'Render failed.';
+          await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'failed', renderError: message } });
+          return NextResponse.json({ success: true, message: `Approved, but rendering failed: ${message}` });
+        }
+      }
 
-      await NotificationService.sendDiscordNotification(
-        'Script approved',
-        `"${item.topic}" is approved and queued for rendering.`,
-        'success'
-      );
+      // No source clip, or no worker connected yet.
+      if (!item.clipId) {
+        await prisma.video.create({ data: { topic: item.topic, videoUrl: '', platform: 'both', status: 'pending' } });
+      }
+
+      await NotificationService.sendDiscordNotification('Script approved', `"${item.topic}" is approved.`, 'success');
 
       return NextResponse.json({
         success: true,
-        message: 'Approved. Script is queued for rendering on the media worker.',
+        message: renderWorkerConfigured()
+          ? 'Approved. Queued for rendering.'
+          : 'Approved. Connect the render worker (see worker/README.md) to produce the actual video file.',
       });
     }
 

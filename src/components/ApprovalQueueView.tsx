@@ -32,10 +32,10 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Content ${action === 'approve' ? 'approved & scheduled for generation' : 'rejected'}!`, { id: 'approval' });
+        toast.success(data.message || (action === 'approve' ? 'Approved!' : 'Rejected!'), { id: 'approval', duration: 6000 });
         onRefresh();
       } else {
-        toast.error('Failed to process approval.', { id: 'approval' });
+        toast.error(data.error || 'Failed to process approval.', { id: 'approval', duration: 7000 });
       }
     } catch (e) {
       toast.error('Network error processing approval.', { id: 'approval' });
