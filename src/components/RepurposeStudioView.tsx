@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { ProjectData, ClipData } from '@/types';
 import {
   Scissors, Copy, Check, Send, Sparkles, RefreshCw, Video, ExternalLink,
   AlertTriangle, FileText, Radar, Smartphone, Square, Monitor, Eye, Rocket,
+  Link2, Flame, Coffee, TrendingUp, BookOpen,
 } from 'lucide-react';
 
 interface Props {
@@ -35,9 +36,36 @@ const REGIONS: [string, string][] = [
   ['US', 'United States'], ['GB', 'United Kingdom'], ['IN', 'India'], ['CA', 'Canada'], ['AU', 'Australia'],
 ];
 
+// Plain-language stand-ins for the analyzer's internal hook categories —
+// creators shouldn't need to know what "contrarian" means.
+const HOOK_LABELS: Record<string, string> = {
+  contrarian: 'Surprising take',
+  framework: 'Step-by-step',
+  story: 'Story',
+  data: 'Quick fact',
+  question: 'Makes you think',
+  howto: 'How-to',
+  controversy: 'Hot take',
+  insight: 'Insight',
+};
+const humanizeHook = (h?: string | null) => (h && HOOK_LABELS[h]) || 'Highlight';
+
+type Vibe = 'hook' | 'calm' | 'trendy' | 'story';
+const VIBE_LABEL: Record<Vibe, string> = { hook: 'Hook-heavy', calm: 'Calm & informative', trendy: 'Trendy & fast', story: 'Story-driven' };
+const VIBE_ICON: Record<Vibe, React.ElementType> = { hook: Flame, calm: Coffee, trendy: TrendingUp, story: BookOpen };
+
+const AUTOMATIC_STATUSES = [
+  'Scanning what\'s trending…',
+  'Picking the best fit for your niche…',
+  'Reading the video…',
+  'Finding the best moments…',
+  'Writing captions…',
+  'Sending clips to your queue…',
+];
+
 interface TrendingVideo {
   videoId: string; url: string; title: string; channelTitle: string; thumbnail: string | null;
-  viewCount: number; durationSeconds: number;
+  viewCount: number; durationSeconds: number; vibe: Vibe;
 }
 
 function fmt(s: number): string {
@@ -55,6 +83,15 @@ function fmtViews(n: number): string {
   return String(n);
 }
 
+function parseCaptions(raw: ClipData['captionVersions']): Record<string, string> {
+  if (raw && typeof raw === 'object') return raw as unknown as Record<string, string>;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return { instagram: String(raw || '') };
+  }
+}
+
 function parseAspectRatios(raw: ClipData['aspectRatios']): string[] {
   if (Array.isArray(raw)) return raw;
   try {
@@ -65,15 +102,6 @@ function parseAspectRatios(raw: ClipData['aspectRatios']): string[] {
   }
 }
 
-function parseCaptions(raw: ClipData['captionVersions']): Record<string, string> {
-  if (raw && typeof raw === 'object') return raw as unknown as Record<string, string>;
-  try {
-    return JSON.parse(String(raw));
-  } catch {
-    return { instagram: String(raw || '') };
-  }
-}
-
 export function RepurposeStudioView({
   projects = [],
   onRefresh,
@@ -81,15 +109,15 @@ export function RepurposeStudioView({
   defaultOrientations,
   defaultCaptionStyle,
 }: Props) {
-  const [source, setSource] = useState<'trending' | 'link' | 'transcript'>('trending');
-  const [trendingMode, setTrendingMode] = useState<'automatic' | 'manual'>('automatic');
+  const [tab, setTab] = useState<'video' | 'transcript'>('video');
+  const [mode, setMode] = useState<'automatic' | 'browse' | 'link'>('automatic');
   const [url, setUrl] = useState('');
   const [transcript, setTranscript] = useState('');
   const [clipCount, setClipCount] = useState(5);
   const [busy, setBusy] = useState(false);
 
   // Shared run configuration
-  const [platforms, setPlatforms] = useState<string[]>(defaultPlatforms?.length ? defaultPlatforms : [...PLATFORMS]);
+  const [platforms, setPlatforms] = useState<string[]>(defaultPlatforms?.length ? defaultPlatforms : ['instagram', 'youtube', 'tiktok']);
   const [orientations, setOrientations] = useState<string[]>(defaultOrientations?.length ? defaultOrientations : [...ORIENTATIONS]);
   const [captionStyle, setCaptionStyleLocal] = useState<'Dynamic Pop' | 'Minimalist'>(
     defaultCaptionStyle === 'Minimalist' ? 'Minimalist' : 'Dynamic Pop'
@@ -98,10 +126,13 @@ export function RepurposeStudioView({
   // Trending discovery
   const [region, setRegion] = useState('US');
   const [category, setCategory] = useState('');
+  const [vibeFilter, setVibeFilter] = useState<Vibe | 'all'>('all');
   const [trendingVideos, setTrendingVideos] = useState<TrendingVideo[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
   const [automating, setAutomating] = useState(false);
+  const [autoStatus, setAutoStatus] = useState(AUTOMATIC_STATUSES[0]);
   const [lastAutoResult, setLastAutoResult] = useState<{ title: string; channel: string; clipsCreated: number; clipsQueued: number } | null>(null);
+  const statusTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [platform, setPlatform] = useState<Platform>('instagram');
@@ -115,6 +146,8 @@ export function RepurposeStudioView({
     () => [...(activeProject?.clips || [])].sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0)),
     [activeProject]
   );
+
+  useEffect(() => () => { if (statusTimer.current) clearInterval(statusTimer.current); }, []);
 
   const togglePlatform = (p: string) =>
     setPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
@@ -149,16 +182,31 @@ export function RepurposeStudioView({
     }
   };
 
+  const visibleTrending = vibeFilter === 'all' ? trendingVideos : trendingVideos.filter((v) => v.vibe === vibeFilter);
+
   const useTrendingVideo = (v: TrendingVideo) => {
-    setSource('link');
+    setMode('link');
     setUrl(v.url);
-    toast.success(`Loaded "${v.title}" — review the config below, then Analyze.`);
+    toast.success(`Loaded "${v.title}" — hit Analyze when ready.`);
+  };
+
+  const startStatusCycle = () => {
+    let i = 0;
+    setAutoStatus(AUTOMATIC_STATUSES[0]);
+    statusTimer.current = setInterval(() => {
+      i = Math.min(i + 1, AUTOMATIC_STATUSES.length - 1);
+      setAutoStatus(AUTOMATIC_STATUSES[i]);
+    }, 6000);
+  };
+  const stopStatusCycle = () => {
+    if (statusTimer.current) clearInterval(statusTimer.current);
+    statusTimer.current = null;
   };
 
   const runAutomatic = async () => {
     setAutomating(true);
     setLastAutoResult(null);
-    toast.loading('Finding a trending video for your niche…', { id: 'auto' });
+    startStatusCycle();
     try {
       const res = await fetch('/api/trends/automate', {
         method: 'POST',
@@ -167,7 +215,7 @@ export function RepurposeStudioView({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message, { id: 'auto', duration: 6000 });
+        toast.success('Done — clips are in your Approval Queue.', { duration: 5000 });
         setLastAutoResult({
           title: data.result.video.title,
           channel: data.result.video.channelTitle,
@@ -177,11 +225,12 @@ export function RepurposeStudioView({
         setSelectedProjectId(data.result.projectId);
         onRefresh();
       } else {
-        toast.error(data.error || 'Automatic run failed.', { id: 'auto', duration: 8000 });
+        toast.error(data.error || 'Automatic run failed.', { duration: 8000 });
       }
     } catch {
-      toast.error('Network error running automatic discovery.', { id: 'auto' });
+      toast.error('Network error running automatic discovery.');
     } finally {
+      stopStatusCycle();
       setAutomating(false);
     }
   };
@@ -189,7 +238,7 @@ export function RepurposeStudioView({
   const analyze = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (busy) return;
-    const isLink = source === 'link';
+    const isLink = tab === 'video';
     if (isLink && !/youtube\.com|youtu\.be/.test(url)) {
       toast.error('Paste a valid YouTube link.');
       return;
@@ -200,7 +249,7 @@ export function RepurposeStudioView({
     }
 
     setBusy(true);
-    toast.loading(isLink ? 'Fetching transcript & analyzing…' : 'Analyzing transcript…', { id: 'an' });
+    toast.loading(isLink ? 'Reading the video & finding highlights…' : 'Analyzing transcript…', { id: 'an' });
     try {
       const res = await fetch(isLink ? '/api/repurpose' : '/api/repurpose/upload', {
         method: 'POST',
@@ -248,7 +297,7 @@ export function RepurposeStudioView({
   };
 
   const queueClip = async (clipId: string) => {
-    toast.loading('Queueing…', { id: 'q' });
+    toast.loading('Sending to queue…', { id: 'q' });
     try {
       const res = await fetch(`/api/repurpose/clip/${clipId}`, {
         method: 'PATCH',
@@ -278,7 +327,7 @@ export function RepurposeStudioView({
     return [
       `${clip.title}`,
       `Timestamp: ${fmt(clip.startTime)} – ${fmt(clip.endTime)}  (${clip.duration}s)`,
-      `Virality: ${clip.viralityScore}/100 · ${clip.hookType || 'insight'}`,
+      `Style: ${humanizeHook(clip.hookType)} · Virality: ${clip.viralityScore}/100`,
       yt ? `Jump to source: ${yt}` : '',
       ``,
       `Why: ${clip.reasoning}`,
@@ -292,121 +341,149 @@ export function RepurposeStudioView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* Source picker + analyzer */}
       <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div className="segmented-control">
-          <button className={`segmented-item ${source === 'trending' ? 'active' : ''}`} onClick={() => setSource('trending')}>
-            <Radar size={13} /> Trending
+          <button className={`segmented-item ${tab === 'video' ? 'active' : ''}`} onClick={() => setTab('video')}>
+            <Video size={13} /> Add a video
           </button>
-          <button className={`segmented-item ${source === 'link' ? 'active' : ''}`} onClick={() => setSource('link')}>
-            <Video size={13} /> YouTube link
-          </button>
-          <button className={`segmented-item ${source === 'transcript' ? 'active' : ''}`} onClick={() => setSource('transcript')}>
-            <FileText size={13} /> Paste transcript
+          <button className={`segmented-item ${tab === 'transcript' ? 'active' : ''}`} onClick={() => setTab('transcript')}>
+            <FileText size={13} /> Paste a transcript
           </button>
         </div>
 
-        {/* TRENDING SOURCE */}
-        {source === 'trending' && (
+        {tab === 'video' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div className="segmented-control" style={{ alignSelf: 'flex-start' }}>
-              <button className={`segmented-item ${trendingMode === 'automatic' ? 'active' : ''}`} onClick={() => setTrendingMode('automatic')}>
+              <button className={`segmented-item ${mode === 'automatic' ? 'active' : ''}`} onClick={() => setMode('automatic')}>
                 <Rocket size={13} /> Automatic
               </button>
-              <button className={`segmented-item ${trendingMode === 'manual' ? 'active' : ''}`} onClick={() => setTrendingMode('manual')}>
-                <Eye size={13} /> Manual
+              <button className={`segmented-item ${mode === 'browse' ? 'active' : ''}`} onClick={() => setMode('browse')}>
+                <Radar size={13} /> Browse trending
+              </button>
+              <button className={`segmented-item ${mode === 'link' ? 'active' : ''}`} onClick={() => setMode('link')}>
+                <Link2 size={13} /> Paste a link
               </button>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <select className="input-field" style={{ width: 160 }} value={region} onChange={(e) => setRegion(e.target.value)}>
-                {REGIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-              </select>
-              <select className="input-field" style={{ width: 180 }} value={category} onChange={(e) => setCategory(e.target.value)}>
-                {CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-              </select>
-
-              {trendingMode === 'manual' ? (
-                <button type="button" className="btn btn-secondary" onClick={findTrending} disabled={trendingLoading}>
-                  {trendingLoading ? <RefreshCw size={14} className="animate-spin" /> : <Radar size={14} />}
-                  {trendingLoading ? 'Finding…' : 'Find trending videos'}
-                </button>
-              ) : (
-                <button type="button" className="btn btn-primary" onClick={runAutomatic} disabled={automating}>
-                  {automating ? <RefreshCw size={14} className="animate-spin" /> : <Rocket size={14} />}
-                  {automating ? 'Running…' : 'Run automatic discovery'}
-                </button>
-              )}
-            </div>
-
-            {trendingMode === 'automatic' ? (
-              <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
-                Zero clicks from here: picks the trending video that best fits your Settings niche, analyzes it, and sends every clip straight to the <strong>Approval Queue</strong> for your final review — nothing publishes automatically.
-              </p>
-            ) : (
-              <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
-                Browse what&apos;s trending, pick one video, then tune the run config below before analyzing.
-              </p>
-            )}
-
-            {lastAutoResult && (
-              <div className="panel-card" style={{ background: 'var(--bg-elevated)', display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
-                <Check size={16} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
-                <div style={{ fontSize: '0.8125rem' }}>
-                  <strong>{lastAutoResult.title}</strong> <span className="text-subtle">· {lastAutoResult.channel}</span>
-                  <p className="text-muted" style={{ marginTop: '0.2rem' }}>
-                    {lastAutoResult.clipsCreated} clips created, {lastAutoResult.clipsQueued} sent to the Approval Queue.
-                  </p>
+            {mode === 'automatic' && (
+              <>
+                <p className="text-muted" style={{ fontSize: '0.8125rem' }}>
+                  One click. Viralis finds a trending video that fits your niche, analyzes it, writes the captions, and sends every clip straight to your <strong>Approval Queue</strong> — nothing else to do.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select className="input-field" style={{ width: 160 }} value={region} onChange={(e) => setRegion(e.target.value)}>
+                    {REGIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                  </select>
+                  <select className="input-field" style={{ width: 180 }} value={category} onChange={(e) => setCategory(e.target.value)}>
+                    {CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
+                  <button type="button" className="btn btn-primary" onClick={runAutomatic} disabled={automating}>
+                    {automating ? <RefreshCw size={14} className="animate-spin" /> : <Rocket size={14} />}
+                    {automating ? autoStatus : 'Run automatic'}
+                  </button>
                 </div>
-              </div>
-            )}
+                {automating && (
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>Usually 20–60 seconds, longer for long videos.</p>
+                )}
 
-            {trendingMode === 'manual' && trendingVideos.length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
-                {trendingVideos.map((v) => (
-                  <div key={v.videoId} className="panel-card panel-card-interactive" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={() => useTrendingVideo(v)}>
-                    <div style={{ position: 'relative', height: 120, background: 'var(--bg-elevated)' }}>
-                      {v.thumbnail && (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={v.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      )}
-                      <span style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: '0.6875rem', padding: '0.1rem 0.35rem', borderRadius: 4 }}>
-                        {fmt(v.durationSeconds)}
-                      </span>
-                    </div>
-                    <div style={{ padding: '0.65rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', flex: 1 }}>
-                      <h4 style={{ fontSize: '0.78125rem', fontWeight: 600, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v.title}</h4>
-                      <p className="text-subtle" style={{ fontSize: '0.7rem' }}>{v.channelTitle}</p>
-                      <p className="text-subtle" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: 'auto' }}>
-                        <Eye size={11} /> {fmtViews(v.viewCount)}
+                {lastAutoResult && (
+                  <div className="panel-card" style={{ background: 'var(--bg-elevated)', display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+                    <Check size={16} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ fontSize: '0.8125rem' }}>
+                      <strong>{lastAutoResult.title}</strong> <span className="text-subtle">· {lastAutoResult.channel}</span>
+                      <p className="text-muted" style={{ marginTop: '0.2rem' }}>
+                        {lastAutoResult.clipsCreated} clips ready, already sent to your Approval Queue.
                       </p>
                     </div>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
+            )}
+
+            {mode === 'browse' && (
+              <>
+                <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
+                  See what&apos;s trending, filter by the style you want, pick one, then tune the details before analyzing.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select className="input-field" style={{ width: 160 }} value={region} onChange={(e) => setRegion(e.target.value)}>
+                    {REGIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                  </select>
+                  <select className="input-field" style={{ width: 180 }} value={category} onChange={(e) => setCategory(e.target.value)}>
+                    {CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
+                  <button type="button" className="btn btn-secondary" onClick={findTrending} disabled={trendingLoading}>
+                    {trendingLoading ? <RefreshCw size={14} className="animate-spin" /> : <Radar size={14} />}
+                    {trendingLoading ? 'Finding…' : 'Find trending videos'}
+                  </button>
+                </div>
+
+                {trendingVideos.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button className={`filter-chip ${vibeFilter === 'all' ? 'active' : ''}`} onClick={() => setVibeFilter('all')}>All</button>
+                    {(['hook', 'calm', 'trendy', 'story'] as Vibe[]).map((v) => {
+                      const Icon = VIBE_ICON[v];
+                      return (
+                        <button key={v} className={`filter-chip ${vibeFilter === v ? 'active' : ''}`} onClick={() => setVibeFilter(v)}>
+                          <Icon size={12} /> {VIBE_LABEL[v]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {mode === 'browse' && trendingVideos.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                    {visibleTrending.map((v) => {
+                      const VibeIcon = VIBE_ICON[v.vibe];
+                      return (
+                        <div key={v.videoId} className="panel-card panel-card-interactive" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={() => useTrendingVideo(v)}>
+                          <div style={{ position: 'relative', height: 120, background: 'var(--bg-elevated)' }}>
+                            {v.thumbnail && (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={v.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            )}
+                            <span style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: '0.6875rem', padding: '0.1rem 0.35rem', borderRadius: 4 }}>
+                              {fmt(v.durationSeconds)}
+                            </span>
+                            <span style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: '0.65rem', padding: '0.1rem 0.4rem', borderRadius: 4, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <VibeIcon size={10} /> {VIBE_LABEL[v.vibe]}
+                            </span>
+                          </div>
+                          <div style={{ padding: '0.65rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', flex: 1 }}>
+                            <h4 style={{ fontSize: '0.78125rem', fontWeight: 600, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v.title}</h4>
+                            <p className="text-subtle" style={{ fontSize: '0.7rem' }}>{v.channelTitle}</p>
+                            <p className="text-subtle" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: 'auto' }}>
+                              <Eye size={11} /> {fmtViews(v.viewCount)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {mode === 'link' && (
+              <form onSubmit={analyze} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <input
+                  className="input-field"
+                  style={{ flex: '1 1 320px' }}
+                  placeholder="https://www.youtube.com/watch?v=…"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+                <button type="submit" className="btn btn-primary" disabled={busy} style={{ minWidth: 150 }}>
+                  {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  {busy ? 'Analyzing…' : 'Analyze'}
+                </button>
+              </form>
             )}
           </div>
         )}
 
-        {/* LINK SOURCE */}
-        {source === 'link' && (
-          <form onSubmit={analyze} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-            <input
-              className="input-field"
-              style={{ flex: '1 1 320px' }}
-              placeholder="https://www.youtube.com/watch?v=…"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <button type="submit" className="btn btn-primary" disabled={busy} style={{ minWidth: 150 }}>
-              {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              {busy ? 'Analyzing…' : 'Analyze'}
-            </button>
-          </form>
-        )}
-
-        {/* TRANSCRIPT SOURCE */}
-        {source === 'transcript' && (
+        {tab === 'transcript' && (
           <form onSubmit={analyze} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
             <textarea
               className="input-field"
@@ -422,54 +499,51 @@ export function RepurposeStudioView({
           </form>
         )}
 
-        {/* SHARED RUN CONFIG */}
-        {source !== 'trending' && (
-          <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '-0.4rem' }}>
-            Viralis reads the video&apos;s captions, finds the highest-potential moments, and writes native copy for every platform. Cutting the actual MP4 runs on the media worker (not part of this deployment).
-          </p>
-        )}
-
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-          <span className="eyebrow">Run configuration</span>
-          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Platforms</span>
-              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                {PLATFORMS.map((p) => (
-                  <button key={p} type="button" onClick={() => togglePlatform(p)} className={`filter-chip ${platforms.includes(p) ? 'active' : ''}`}>
-                    {PLATFORM_LABEL[p]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Orientation</span>
-              <div style={{ display: 'flex', gap: '0.35rem' }}>
-                {ORIENTATIONS.map((o) => {
-                  const Icon = ORIENTATION_ICON[o];
-                  return (
-                    <button key={o} type="button" onClick={() => toggleOrientation(o)} className={`filter-chip ${orientations.includes(o) ? 'active' : ''}`}>
-                      <Icon size={12} /> {o}
+        {/* SHARED RUN CONFIG — hidden for the zero-click automatic path */}
+        {!(tab === 'video' && mode === 'automatic') && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            <span className="eyebrow">Before you analyze</span>
+            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Post to</span>
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  {PLATFORMS.map((p) => (
+                    <button key={p} type="button" onClick={() => togglePlatform(p)} className={`filter-chip ${platforms.includes(p) ? 'active' : ''}`}>
+                      {PLATFORM_LABEL[p]}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Shape</span>
+                <div style={{ display: 'flex', gap: '0.35rem' }}>
+                  {ORIENTATIONS.map((o) => {
+                    const Icon = ORIENTATION_ICON[o];
+                    return (
+                      <button key={o} type="button" onClick={() => toggleOrientation(o)} className={`filter-chip ${orientations.includes(o) ? 'active' : ''}`}>
+                        <Icon size={12} /> {o}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Caption feel</span>
+                <div className="segmented-control">
+                  <button type="button" className={`segmented-item ${captionStyle === 'Dynamic Pop' ? 'active' : ''}`} onClick={() => setCaptionStyleLocal('Dynamic Pop')}>Punchy</button>
+                  <button type="button" className={`segmented-item ${captionStyle === 'Minimalist' ? 'active' : ''}`} onClick={() => setCaptionStyleLocal('Minimalist')}>Clean</button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>How many clips</span>
+                <select className="input-field" style={{ width: 72 }} value={clipCount} onChange={(e) => setClipCount(Number(e.target.value))}>
+                  {[3, 5, 7, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Caption style</span>
-              <div className="segmented-control">
-                <button type="button" className={`segmented-item ${captionStyle === 'Dynamic Pop' ? 'active' : ''}`} onClick={() => setCaptionStyleLocal('Dynamic Pop')}>Dynamic Pop</button>
-                <button type="button" className={`segmented-item ${captionStyle === 'Minimalist' ? 'active' : ''}`} onClick={() => setCaptionStyleLocal('Minimalist')}>Minimalist</button>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Clips</span>
-              <select className="input-field" style={{ width: 72 }} value={clipCount} onChange={(e) => setClipCount(Number(e.target.value))}>
-                {[3, 5, 7, 10].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
+            <p className="text-subtle" style={{ fontSize: '0.72rem' }}>Fewer platforms and clips means a faster result.</p>
           </div>
-        </div>
+        )}
       </div>
 
       {projects.length === 0 ? (
@@ -479,7 +553,7 @@ export function RepurposeStudioView({
           </div>
           <h3 className="section-title" style={{ marginBottom: '0.3rem' }}>Nothing analyzed yet</h3>
           <p className="text-muted" style={{ fontSize: '0.8125rem', maxWidth: 420, margin: '0 auto' }}>
-            Run automatic discovery, pick a trending video, or paste a YouTube link. You&apos;ll get ranked viral moments with exact timestamps and ready-to-post captions.
+            Try Automatic above for the fastest start, or browse trending videos and pick one yourself.
           </p>
         </div>
       ) : (
@@ -536,6 +610,7 @@ export function RepurposeStudioView({
                 ? `https://youtu.be/${activeProject.sourceVideoId}?t=${Math.floor(clip.startTime)}`
                 : null;
               const clipPlatforms = PLATFORMS.filter((p) => caps[p]);
+              const queued = clip.status === 'approved';
               return (
                 <div key={clip.id} className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                   <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
@@ -554,8 +629,8 @@ export function RepurposeStudioView({
                         <span className="text-subtle tnum" style={{ fontSize: '0.75rem' }}>#{i + 1}</span>
                         <span className="badge badge-neutral">{fmt(clip.startTime)}–{fmt(clip.endTime)}</span>
                         <span className="badge badge-neutral">{clip.duration}s</span>
-                        {clip.hookType && <span className="badge badge-primary" style={{ textTransform: 'capitalize' }}>{clip.hookType}</span>}
-                        {clip.status === 'approved' && <span className="badge badge-success">Queued</span>}
+                        <span className="badge badge-primary">{humanizeHook(clip.hookType)}</span>
+                        {queued && <span className="badge badge-success"><Check size={10} /> In queue</span>}
                         {parseAspectRatios(clip.aspectRatios).map((o: string) => (
                           <span key={o} className="badge badge-neutral">{o}</span>
                         ))}
@@ -610,9 +685,11 @@ export function RepurposeStudioView({
                     <button className="btn btn-secondary btn-sm" onClick={() => copy(shotList(clip), `${clip.id}-shot`)}>
                       {copiedKey === `${clip.id}-shot` ? <Check size={13} color="var(--green)" /> : <Copy size={13} />} Copy shot list
                     </button>
-                    <button className="btn btn-primary btn-sm" onClick={() => queueClip(clip.id)} disabled={clip.status === 'approved'}>
-                      <Send size={13} /> {clip.status === 'approved' ? 'In queue' : 'Send to queue'}
-                    </button>
+                    {!queued && (
+                      <button className="btn btn-primary btn-sm" onClick={() => queueClip(clip.id)}>
+                        <Send size={13} /> Send to queue
+                      </button>
+                    )}
                   </div>
                 </div>
               );
