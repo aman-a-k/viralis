@@ -3,6 +3,9 @@ import { describeLlmError } from '@/lib/llm';
 import { RepurposingService } from '@/services/repurposingService';
 import { requireSession } from '@/lib/apiAuth';
 
+// Analysis chains multiple LLM calls; allow up to the Hobby-plan max.
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;

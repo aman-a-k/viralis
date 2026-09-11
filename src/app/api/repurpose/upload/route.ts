@@ -3,6 +3,9 @@ import { describeLlmError } from '@/lib/llm';
 import { RepurposingService } from '@/services/repurposingService';
 import { requireSession } from '@/lib/apiAuth';
 
+// Analysis chains multiple LLM calls; allow up to the Hobby-plan max.
+export const maxDuration = 60;
+
 /**
  * "Upload" now means: paste a transcript for analysis. Analyzing a raw video
  * file requires the media worker (transcription + processing), which is not

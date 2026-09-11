@@ -4,6 +4,10 @@ import { runAutomaticDiscovery } from '@/services/automationService';
 import { describeLlmError } from '@/lib/llm';
 import { MissingYouTubeKeyError } from '@/services/youtubeTrending';
 
+// Discovery + analysis chains several sequential LLM calls; allow up to the
+// Hobby-plan max (Pro/Enterprise allow more via the same export).
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;

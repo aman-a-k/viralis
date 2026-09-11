@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { WorkflowScheduler } from '@/services/scheduler';
 import { requireSession } from '@/lib/apiAuth';
 
+// The autopilot workflow chains several sequential LLM calls; allow up to
+// the Hobby-plan max.
+export const maxDuration = 60;
+
 export async function POST() {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;

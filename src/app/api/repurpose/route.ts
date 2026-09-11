@@ -4,6 +4,9 @@ import { RepurposingService } from '@/services/repurposingService';
 import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/apiAuth';
 
+// Analysis chains multiple LLM calls; allow up to the Hobby-plan max.
+export const maxDuration = 60;
+
 export async function GET() {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;
