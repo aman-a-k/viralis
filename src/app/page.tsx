@@ -65,7 +65,7 @@ export default function Dashboard() {
   // Trending discovery
   const [youtubeDataApiKey, setYoutubeDataApiKey] = useState('');
   const [hasYoutubeDataKey, setHasYoutubeDataKey] = useState(false);
-  const [defaultPlatforms, setDefaultPlatforms] = useState<string[]>(['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok']);
+  const [defaultPlatforms, setDefaultPlatforms] = useState<string[]>(['instagram', 'youtube', 'tiktok']);
   const [defaultOrientations, setDefaultOrientations] = useState<string[]>(['9:16', '1:1', '16:9']);
 
   const fetchData = async () => {
