@@ -1,55 +1,47 @@
 import { TrendAgent } from './trendAgent';
 import { ContentAgent } from './contentAgent';
-import { VideoAgent } from './videoAgent';
-import { PublisherAgent } from './publisherAgent';
 import { prisma } from '../lib/prisma';
 
+/**
+ * Autopilot: discover a trend -> write + optimize a script -> drop it in the
+ * approval queue for a human to review. Rendering + publishing happen after
+ * approval, on the media worker.
+ */
 export class Orchestrator {
   private trendAgent = new TrendAgent();
   private contentAgent = new ContentAgent();
-  private videoAgent = new VideoAgent();
-  private publisherAgent = new PublisherAgent();
 
   async executeFullWorkflow() {
-    console.log('--- Starting Orchestrated AI Workflow ---');
+    console.log('[Orchestrator] Autopilot cycle starting…');
 
-    try {
-      // 1. Identify Trend
-      const trendResult = await this.trendAgent.run();
-      if (!trendResult.success) throw new Error(trendResult.message);
-      
-      const { originalTrend, aiAnalysis } = trendResult.data;
-      if (!aiAnalysis.isViable) {
-        console.log(`Trend "${originalTrend.topic}" is not viable. Skipping...`);
-        return;
-      }
+    const trendResult = await this.trendAgent.run();
+    if (!trendResult.success) throw new Error(trendResult.error || trendResult.message);
 
-      // 2. Generate Content
-      const contentResult = await this.contentAgent.run(originalTrend);
-      if (!contentResult.success) throw new Error(contentResult.message);
-
-      // 3. Save to Approval Queue (Human-in-the-Loop)
-      console.log(`Sending content for "${originalTrend.topic}" to approval queue...`);
-      
-      await prisma.approvalQueue.create({
-        data: {
-          topic: originalTrend.topic,
-          script: contentResult.data.polished?.polishedScript || contentResult.data.original.script,
-          visualPrompts: JSON.stringify(contentResult.data.polished?.refinedScenes || contentResult.data.original.scenes || []),
-          captions: JSON.stringify(contentResult.data.original.captions),
-          seoTitle: contentResult.data.polished?.title,
-          seoDescription: contentResult.data.polished?.description,
-          seoTags: JSON.stringify(contentResult.data.polished?.tags || []),
-          status: 'pending'
-        }
-      });
-
-      console.log('--- Workflow Paused for Approval ---');
-      return { success: true, message: 'Content sent to approval queue.' };
-
-    } catch (error: any) {
-      console.error(`[Orchestrator] Fatal Error: ${error.message}`);
-      return { success: false, message: error.message };
+    const { originalTrend, aiAnalysis } = trendResult.data;
+    if (aiAnalysis?.isViable === false) {
+      console.log(`[Orchestrator] "${originalTrend.topic}" judged not viable — skipping.`);
+      return { success: true, message: `Skipped "${originalTrend.topic}" (not viable).` };
     }
+
+    const contentResult = await this.contentAgent.run(originalTrend);
+    if (!contentResult.success) throw new Error(contentResult.error || contentResult.message);
+
+    const { original, polished } = contentResult.data;
+
+    await prisma.approvalQueue.create({
+      data: {
+        topic: originalTrend.topic,
+        script: polished?.polishedScript || original.script,
+        visualPrompts: JSON.stringify(polished?.refinedScenes || original.scenes || []),
+        captions: JSON.stringify(original.captions || []),
+        seoTitle: polished?.title || null,
+        seoDescription: polished?.description || null,
+        seoTags: JSON.stringify(polished?.tags || []),
+        status: 'pending',
+      },
+    });
+
+    console.log(`[Orchestrator] "${originalTrend.topic}" sent to approval queue.`);
+    return { success: true, message: `"${originalTrend.topic}" is in the approval queue.` };
   }
 }

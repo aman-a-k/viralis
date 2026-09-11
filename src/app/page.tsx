@@ -15,11 +15,13 @@ import { AgentStatusView } from '@/components/AgentStatusView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
 import { ApprovalQueueView } from '@/components/ApprovalQueueView';
 import { LandingPage } from '@/components/LandingPage';
-import { signIn, signOut, useSession } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 
 export default function Dashboard() {
   const { data: session, status: authStatus } = useSession();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -38,7 +40,10 @@ export default function Dashboard() {
   // Settings State
   const [ytId, setYtId] = useState('');
   const [igId, setIgId] = useState('');
-  const [openAi, setOpenAi] = useState('');
+  const [aiProvider, setAiProvider] = useState('gemini');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [hasAiKey, setHasAiKey] = useState(false);
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSecret, setYtClientSecret] = useState('');
   const [igAccessToken, setIgAccessToken] = useState('');
@@ -66,7 +71,9 @@ export default function Dashboard() {
         if (json.data.settings) {
           setYtId(json.data.settings.youtubeId || '');
           setIgId(json.data.settings.instagramId || '');
-          setOpenAi(json.data.settings.openAiKey || '');
+          setAiProvider(json.data.settings.aiProvider || 'gemini');
+          setAiModel(json.data.settings.aiModel || '');
+          setHasAiKey(!!json.data.settings.hasAiKey);
           setYtClientId(json.data.settings.youtubeClientId || '');
           setYtClientSecret(json.data.settings.youtubeClientSecret || '');
           setIgAccessToken(json.data.settings.instagramAccessToken || '');
@@ -90,6 +97,12 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (authStatus === 'loading') return;
+    if (authStatus !== 'authenticated') {
+      setLoading(false);
+      return;
+    }
+
     fetchData();
     const interval = setInterval(fetchData, 30000);
     if (typeof window !== 'undefined' && window.location.search.includes('success=youtube_connected')) {
@@ -97,7 +110,7 @@ export default function Dashboard() {
       window.history.replaceState(null, '', '/');
     }
     return () => clearInterval(interval);
-  }, []);
+  }, [authStatus]);
 
   const handleForceRun = async () => {
     setIsRunning(true);
@@ -131,7 +144,9 @@ export default function Dashboard() {
         body: JSON.stringify({ 
           youtubeId: ytId, 
           instagramId: igId, 
-          openAiKey: openAi,
+          aiProvider,
+          aiApiKey: aiApiKey || undefined,
+          aiModel: aiModel || undefined,
           youtubeClientId: ytClientId,
           youtubeClientSecret: ytClientSecret,
           instagramAccessToken: igAccessToken,
@@ -182,7 +197,7 @@ export default function Dashboard() {
   }
 
   if (authStatus !== 'authenticated') {
-    return <LandingPage onSignIn={() => signIn('google')} />;
+    return <LandingPage onSignIn={() => router.push('/auth/signin')} />;
   }
 
   const {
@@ -199,72 +214,65 @@ export default function Dashboard() {
     <div className="app-shell">
       {/* Top Header Bar (YouTube Studio / Meta Style) */}
       <header className="top-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', minWidth: 0 }}>
           <button
             type="button"
-            className="btn btn-ghost mobile-nav-toggle"
-            style={{ padding: '0.35rem' }}
+            className="icon-btn mobile-nav-toggle"
             onClick={() => setMobileNavOpen((v) => !v)}
             aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileNavOpen}
           >
-            {mobileNavOpen ? <X size={18} /> : <Menu size={18} />}
+            {mobileNavOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
 
           {/* Logo Mark */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Zap size={16} color="#fff" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <div style={{ width: '26px', height: '26px', borderRadius: '7px', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Zap size={15} color="#fff" fill="#fff" />
             </div>
-            <span style={{ fontSize: '1.0625rem', fontWeight: 800, letterSpacing: '-0.03em', color: '#fff' }}>
+            <span style={{ fontSize: '0.9375rem', fontWeight: 650, letterSpacing: '-0.02em', color: 'var(--text)' }}>
               Viralis
             </span>
           </div>
 
-          <div style={{ height: '16px', width: '1px', background: 'var(--surface-border)' }}></div>
+          <span className="divider-v" />
 
-          {/* Workspace Channel Switcher */}
-          <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', background: 'transparent', border: 'none' }}>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--foreground)' }}>
-              Acme Media Studio
-            </span>
-            <span className="badge badge-neutral" style={{ fontSize: '0.625rem' }}>
-              PRO
-            </span>
-            <ChevronDown size={14} color="var(--foreground-subtle)" />
+          {/* Workspace Switcher */}
+          <button type="button" className="btn btn-ghost" style={{ gap: '0.45rem', paddingLeft: '0.4rem', paddingRight: '0.5rem' }}>
+            <span style={{ width: '18px', height: '18px', borderRadius: '5px', background: 'var(--surface-3)', border: '1px solid var(--border-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.625rem', fontWeight: 700, color: 'var(--text-2)' }}>A</span>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 550, color: 'var(--text)' }}>Acme Media Studio</span>
+            <ChevronDown size={13} color="var(--text-3)" />
           </button>
         </div>
 
-        {/* Center Search / Command Bar */}
+        {/* Center Search */}
         <div className="header-search">
-          <Search size={14} color="var(--foreground-subtle)" aria-hidden="true" />
+          <Search aria-hidden="true" />
           <input
             type="text"
-            placeholder="Search projects, clips, or command..."
+            placeholder="Search or jump to…"
             aria-label="Search projects, clips, or command"
           />
-          <span style={{ fontSize: '0.625rem', color: 'var(--foreground-subtle)', border: '1px solid var(--surface-border)', padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
-            ⌘K
-          </span>
+          <kbd>⌘K</kbd>
         </div>
 
-        {/* Right Status & Profile Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', padding: '0.25rem 0.65rem', borderRadius: 'var(--radius-sm)', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} aria-hidden="true"></span>
-            <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#10b981' }}>Pipeline Online</span>
-          </div>
+        {/* Right controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span className="badge badge-neutral" style={{ gap: '0.4rem' }}>
+            <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} aria-hidden="true"></span>
+            Pipeline online
+          </span>
 
-          <button type="button" className="btn btn-ghost" style={{ padding: '0.35rem' }} aria-label="Notifications">
+          <button type="button" className="icon-btn" aria-label="Notifications">
             <Bell size={16} />
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             {authStatus === 'authenticated' && session?.user?.image ? (
-              <img src={session.user.image} alt={session.user.name ? `${session.user.name}'s avatar` : 'Your account'} style={{ width: '28px', height: '28px', borderRadius: '50%' }} />
+              <img src={session.user.image} alt={session.user.name ? `${session.user.name}'s avatar` : 'Your account'} style={{ width: '26px', height: '26px', borderRadius: '50%', border: '1px solid var(--border-2)' }} />
             ) : (
-              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--surface-subtle)', border: '1px solid var(--surface-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-hidden="true">
-                <UserIcon size={14} color="var(--foreground-muted)" />
+              <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: '#b3a4f0' }} aria-hidden="true">
+                {session?.user?.name?.[0]?.toUpperCase() || 'U'}
               </div>
             )}
           </div>
@@ -282,89 +290,73 @@ export default function Dashboard() {
 
         {/* Sidebar Navigation */}
         <aside className={`sidebar-nav ${mobileNavOpen ? 'open' : ''}`} aria-label="Primary">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {/* Group 1: CORE STUDIO */}
-            <div>
-              <p className="sidebar-section-title">Core Studio</p>
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => goToTab('overview')}>
-                  <LayoutDashboard size={15} /> Overview
-                </button>
-                <button className={`nav-link ${activeTab === 'repurpose' ? 'active' : ''}`} onClick={() => goToTab('repurpose')}>
-                  <Scissors size={15} /> Repurpose Studio
-                  <span className="badge badge-primary" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
-                    NEW
-                  </span>
-                </button>
-                <button className={`nav-link ${activeTab === 'autopilot' ? 'active' : ''}`} onClick={() => goToTab('autopilot')}>
-                  <Sparkles size={15} /> Autopilot Generator
-                </button>
-              </nav>
-            </div>
-
-            {/* Group 2: DISTRIBUTION */}
-            <div>
-              <p className="sidebar-section-title">Distribution</p>
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => goToTab('queue')}>
-                  <ClipboardCheck size={15} /> Approval Queue
-                  {pendingQueueCount > 0 && (
-                    <span className="badge badge-warning" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
-                      {pendingQueueCount}
-                    </span>
-                  )}
-                </button>
-                <button className={`nav-link ${activeTab === 'content' ? 'active' : ''}`} onClick={() => goToTab('content')}>
-                  <Video size={15} /> Content Library
-                </button>
-              </nav>
-            </div>
-
-            {/* Group 3: INTELLIGENCE */}
-            <div>
-              <p className="sidebar-section-title">Intelligence</p>
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'learning-loop' ? 'active' : ''}`} onClick={() => goToTab('learning-loop')}>
-                  <Brain size={15} /> Learning Loop
-                  <span className="badge badge-success" style={{ marginLeft: 'auto', fontSize: '0.625rem', padding: '0.05rem 0.35rem' }}>
-                    AI
-                  </span>
-                </button>
-                <button className={`nav-link ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => goToTab('trends')}>
-                  <History size={15} /> Trend Radar
-                </button>
-              </nav>
-            </div>
-
-            {/* Group 4: SYSTEM */}
-            <div>
-              <p className="sidebar-section-title">System</p>
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                <button className={`nav-link ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => goToTab('agents')}>
-                  <Bot size={15} /> AI Agents Fleet
-                </button>
-                <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => goToTab('settings')}>
-                  <Settings size={15} /> Settings
-                </button>
-              </nav>
-            </div>
+          <div className="sidebar-group">
+            <p className="sidebar-section-title">Studio</p>
+            <button className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => goToTab('overview')}>
+              <LayoutDashboard /> Overview
+            </button>
+            <button className={`nav-link ${activeTab === 'repurpose' ? 'active' : ''}`} onClick={() => goToTab('repurpose')}>
+              <Scissors /> Repurpose Studio
+            </button>
+            <button className={`nav-link ${activeTab === 'autopilot' ? 'active' : ''}`} onClick={() => goToTab('autopilot')}>
+              <Sparkles /> Autopilot Generator
+            </button>
           </div>
 
-          {/* User Sign In/Out in Sidebar Footer */}
-          <div style={{ borderTop: '1px solid var(--surface-border)', paddingTop: '0.75rem' }}>
+          <div className="sidebar-group">
+            <p className="sidebar-section-title">Distribution</p>
+            <button className={`nav-link ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => goToTab('queue')}>
+              <ClipboardCheck /> Approval Queue
+              {pendingQueueCount > 0 && (
+                <span className="badge badge-warning" style={{ marginLeft: 'auto' }}>{pendingQueueCount}</span>
+              )}
+            </button>
+            <button className={`nav-link ${activeTab === 'content' ? 'active' : ''}`} onClick={() => goToTab('content')}>
+              <Video /> Content Library
+            </button>
+          </div>
+
+          <div className="sidebar-group">
+            <p className="sidebar-section-title">Intelligence</p>
+            <button className={`nav-link ${activeTab === 'learning-loop' ? 'active' : ''}`} onClick={() => goToTab('learning-loop')}>
+              <Brain /> Learning Loop
+            </button>
+            <button className={`nav-link ${activeTab === 'trends' ? 'active' : ''}`} onClick={() => goToTab('trends')}>
+              <History /> Trend Radar
+            </button>
+          </div>
+
+          <div className="sidebar-group">
+            <p className="sidebar-section-title">System</p>
+            <button className={`nav-link ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => goToTab('agents')}>
+              <Bot /> Agent Fleet
+            </button>
+            <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => goToTab('settings')}>
+              <Settings /> Settings
+            </button>
+          </div>
+
+          <div className="sidebar-footer">
             {authStatus === 'authenticated' ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ overflow: 'hidden' }}>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{session?.user?.name || 'Creator'}</p>
-                  <p className="text-subtle" style={{ fontSize: '0.6875rem' }}>Pro Creator Plan</p>
+              <div className="sidebar-user">
+                {session?.user?.image ? (
+                  <img src={session.user.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%', border: '1px solid var(--border-2)' }} />
+                ) : (
+                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: '#b3a4f0', flexShrink: 0 }}>
+                    {session?.user?.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+                <div className="sidebar-user-meta">
+                  <p style={{ fontSize: '0.78125rem', fontWeight: 550, color: 'var(--text)' }}>{session?.user?.name || 'Creator'}</p>
+                  <p style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{session?.user?.email || 'Pro plan'}</p>
                 </div>
-                <button onClick={() => signOut()} className="btn btn-ghost" style={{ padding: '0.3rem', color: 'var(--foreground-subtle)' }} aria-label="Sign out">
-                  <LogOut size={13} />
+                <button onClick={() => signOut()} className="icon-btn" style={{ flexShrink: 0 }} aria-label="Sign out">
+                  <LogOut size={14} />
                 </button>
               </div>
             ) : (
-              <button onClick={() => signIn('google')} className="btn btn-secondary" style={{ width: '100%', fontSize: '0.75rem', padding: '0.45rem' }}>
-                Connect Account
+              <button onClick={() => router.push('/auth/signin')} className="btn btn-secondary" style={{ width: '100%' }}>
+                Sign in
               </button>
             )}
           </div>
@@ -373,22 +365,28 @@ export default function Dashboard() {
         {/* Main Viewport Content Area */}
         <main className="main-viewport">
           {/* Header Action Row */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.75rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'capitalize' }}>
-                  {activeTab === 'repurpose' ? 'Repurpose Studio' : activeTab === 'autopilot' ? 'Autopilot Trend Generator' : activeTab === 'learning-loop' ? 'Learning Loop Intelligence' : activeTab.replace('-', ' ')}
-                </h1>
-              </div>
-              <p className="text-muted" style={{ fontSize: '0.8125rem', marginTop: '0.15rem' }}>
-                {activeTab === 'overview' && "Enterprise dashboard for video repurposing, autonomous generation, and performance learning."}
-                {activeTab === 'repurpose' && "Turn long-form video into high-retention 9:16 shorts with automated face tracking & dynamic subtitles."}
-                {activeTab === 'autopilot' && "Scan Google Trends and autonomously write, voice, and produce 4K short-form videos."}
-                {activeTab === 'queue' && "Human review workflow for both repurposed clips and autonomous script generations."}
+              <h1 className="page-title" style={{ textTransform: 'capitalize' }}>
+                {activeTab === 'repurpose' ? 'Repurpose Studio'
+                  : activeTab === 'autopilot' ? 'Autopilot Trend Generator'
+                  : activeTab === 'learning-loop' ? 'Learning Loop'
+                  : activeTab === 'agents' ? 'Agent Fleet'
+                  : activeTab === 'queue' ? 'Approval Queue'
+                  : activeTab === 'content' ? 'Content Library'
+                  : activeTab === 'trends' ? 'Trend Radar'
+                  : activeTab.replace('-', ' ')}
+              </h1>
+              <p className="text-muted" style={{ fontSize: '0.8125rem', marginTop: '0.35rem', maxWidth: '620px' }}>
+                {activeTab === 'overview' && "Video repurposing, autonomous generation, and performance learning at a glance."}
+                {activeTab === 'repurpose' && "Turn long-form video into high-retention 9:16 shorts with automatic reframing and dynamic subtitles."}
+                {activeTab === 'autopilot' && "Scan Google Trends and autonomously write, voice, and produce short-form videos."}
+                {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
                 {activeTab === 'learning-loop' && "Closed-loop audience retention metrics and dynamic highlight re-weighting."}
-                {activeTab === 'trends' && "Real-time Google Trends logs and niche back-catalog matching."}
-                {activeTab === 'agents' && "Monitor multi-agent execution states across highlight detection, editing, and distribution."}
-                {activeTab === 'settings' && "API connection keys, OAuth tokens, and brand voice parameters."}
+                {activeTab === 'trends' && "Real-time Google Trends signals and back-catalog matching."}
+                {activeTab === 'agents' && "Multi-agent execution across highlight detection, editing, and distribution."}
+                {activeTab === 'settings' && "API keys, OAuth connections, and brand voice."}
+                {activeTab === 'content' && "Every rendered clip and autopilot video in one catalog."}
               </p>
             </div>
 
@@ -396,18 +394,18 @@ export default function Dashboard() {
               {activeTab === 'overview' && (
                 <>
                   <button className="btn btn-secondary" onClick={() => setActiveTab('repurpose')}>
-                    <Scissors size={14} /> Open Repurpose Studio
+                    <Scissors /> Open Studio
                   </button>
                   <button className="btn btn-primary" onClick={handleForceRun} disabled={isRunning}>
-                    {isRunning ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
-                    {isRunning ? 'Synthesizing...' : 'Run Autopilot Cycle'}
+                    {isRunning ? <RefreshCw className="animate-spin" /> : <Play />}
+                    {isRunning ? 'Running…' : 'Run Autopilot'}
                   </button>
                 </>
               )}
               {activeTab === 'autopilot' && (
                 <button className="btn btn-primary" onClick={handleForceRun} disabled={isRunning}>
-                  {isRunning ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  {isRunning ? 'Processing...' : 'Run Autopilot Cycle'}
+                  {isRunning ? <RefreshCw className="animate-spin" /> : <Sparkles />}
+                  {isRunning ? 'Processing…' : 'Run Autopilot'}
                 </button>
               )}
             </div>
@@ -415,82 +413,64 @@ export default function Dashboard() {
 
           {/* OVERVIEW TAB */}
           {activeTab === 'overview' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {/* Dual-Engine Master Callout */}
-              <div className="panel-card" style={{ background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-subtle) 100%)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                  <span className="badge badge-primary" style={{ fontSize: '0.6875rem', marginBottom: '0.35rem' }}>
-                    Dual-Engine Architecture
-                  </span>
-                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800 }}>
-                    Viralis Content Engine: Repurpose & Autopilot
-                  </h3>
-                  <p className="text-muted" style={{ fontSize: '0.8125rem', marginTop: '0.25rem', maxWidth: '680px' }}>
-                    Turn 1 long-form masterclass into 10 multi-platform shorts, or autonomously generate 4K viral videos from trending topics with closed-loop performance learning.
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button onClick={() => setActiveTab('repurpose')} className="btn btn-primary" style={{ fontSize: '0.78125rem' }}>
-                    <Scissors size={13} /> Launch Repurpose Studio
-                  </button>
-                  <button onClick={() => setActiveTab('learning-loop')} className="btn btn-secondary" style={{ fontSize: '0.78125rem' }}>
-                    <Brain size={13} /> View Learning Loop
-                  </button>
-                </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Metric row */}
+              <div className="grid-metrics">
+                {[
+                  { label: 'Repurposed highlights', value: totalClipsCount, icon: Scissors, foot: 'Ranked by AI virality' },
+                  { label: 'Autopilot videos', value: videos.length, icon: Video, foot: 'Fully automated pipeline' },
+                  { label: 'Avg. watch-through', value: '74%', icon: TrendingUp, foot: 'Across published clips' },
+                  { label: 'In review', value: pendingQueueCount, icon: ClipboardCheck, foot: 'Awaiting approval' },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  return (
+                    <div key={m.label} className="stat-card">
+                      <div className="stat-head">
+                        <span className="stat-label">{m.label}</span>
+                        <span className="stat-icon"><Icon /></span>
+                      </div>
+                      <p className="stat-value">{m.value}</p>
+                      <span className="stat-foot">{m.foot}</span>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* 3 Metric Cards */}
-              <div className="grid-metrics">
-                <div className="panel-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <span className="text-subtle" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Repurposed Highlights</span>
-                    <Scissors size={15} color="var(--primary)" />
+              {/* Two engines */}
+              <div className="grid-cols-2">
+                <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span className="stat-icon" style={{ color: 'var(--accent)' }}><Scissors /></span>
+                    <span className="section-title">Repurpose Engine</span>
                   </div>
-                  <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
-                    {totalClipsCount}
+                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>
+                    One long-form upload becomes ten platform-native shorts — reframed to 9:16 with burned-in captions.
                   </p>
-                  <span className="badge badge-success" style={{ marginTop: '0.35rem', fontSize: '0.6875rem' }}>
-                    Ranked by AI Virality
-                  </span>
+                  <button onClick={() => setActiveTab('repurpose')} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start', marginTop: '0.15rem' }}>
+                    Open Repurpose Studio <ChevronRight />
+                  </button>
                 </div>
-
-                <div className="panel-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <span className="text-subtle" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Autopilot Videos</span>
-                    <Video size={15} color="#3b82f6" />
+                <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span className="stat-icon" style={{ color: 'var(--accent)' }}><Sparkles /></span>
+                    <span className="section-title">Autopilot Engine</span>
                   </div>
-                  <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
-                    {videos.length}
+                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>
+                    Scans trends, writes the script, generates the voiceover, and renders the video — hands-off.
                   </p>
-                  <span className="badge badge-neutral" style={{ marginTop: '0.35rem', fontSize: '0.6875rem' }}>
-                    100% Automated Workflow
-                  </span>
-                </div>
-
-                <div className="panel-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <span className="text-subtle" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Avg. Watch-Through %</span>
-                    <Brain size={15} color="#10b981" />
-                  </div>
-                  <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
-                    74%
-                  </p>
-                  <span className="badge badge-success" style={{ marginTop: '0.35rem', fontSize: '0.6875rem' }}>
-                    Audience Tuning Active
-                  </span>
+                  <button onClick={() => setActiveTab('learning-loop')} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start', marginTop: '0.15rem' }}>
+                    View Learning Loop <ChevronRight />
+                  </button>
                 </div>
               </div>
 
               {/* Ingested Episodes List */}
               {projects.length > 0 && (
-                <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
-                  <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Active Repurposing Projects</h3>
-                      <p className="text-subtle" style={{ fontSize: '0.75rem' }}>Episodes analyzed with diarized transcripts and surfaced highlights</p>
-                    </div>
-                    <button onClick={() => setActiveTab('repurpose')} className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}>
-                      Open Studio <ChevronRight size={13} />
+                <div className="panel">
+                  <div className="panel-header">
+                    <span className="section-title">Active repurposing projects</span>
+                    <button onClick={() => setActiveTab('repurpose')} className="btn btn-ghost btn-sm">
+                      Open Studio <ChevronRight />
                     </button>
                   </div>
 
@@ -540,17 +520,18 @@ export default function Dashboard() {
               )}
 
               {/* Autopilot Generations Table */}
-              <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Autopilot Trend Generations</h3>
-                  <button onClick={() => setActiveTab('autopilot')} className="btn btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}>
-                    View All <ChevronRight size={13} />
+              <div className="panel">
+                <div className="panel-header">
+                  <span className="section-title">Recent autopilot videos</span>
+                  <button onClick={() => setActiveTab('autopilot')} className="btn btn-ghost btn-sm">
+                    View all <ChevronRight />
                   </button>
                 </div>
 
                 {videos.length === 0 ? (
-                  <div style={{ padding: '3rem', textAlign: 'center' }}>
-                    <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No autopilot videos in the catalog yet. Click &quot;Run Autopilot Cycle&quot; to synthesize your first short.</p>
+                  <div className="panel-empty">
+                    <Sparkles style={{ width: 20, height: 20, margin: '0 auto 0.6rem', opacity: 0.5 }} />
+                    <p>No autopilot videos yet. Run the autopilot to generate your first short.</p>
                   </div>
                 ) : (
                   <div className="table-scroll">
@@ -669,13 +650,53 @@ export default function Dashboard() {
           {activeTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {/* OpenAI Section */}
+                {/* AI Engine */}
                 <div className="panel-card">
-                  <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, marginBottom: '0.75rem' }}>OpenAI Key & Intelligence Engine</h3>
-                  <div className="form-group">
-                    <label className="form-label">OpenAI API Key (Powers Highlight Scoring, Transcript NLP, and Scriptwriting)</label>
-                    <input type="password" value={openAi} onChange={(e) => setOpenAi(e.target.value)} placeholder="sk-..." className="input-field" />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.9rem' }}>
+                    <h3 className="section-title">AI Engine</h3>
+                    <span className={`badge ${hasAiKey ? 'badge-success' : 'badge-warning'}`}>
+                      {hasAiKey ? 'Key set' : 'No key'}
+                    </span>
                   </div>
+                  <p className="text-muted" style={{ fontSize: '0.8125rem', marginBottom: '1rem' }}>
+                    Powers highlight detection, per-platform copy, and trend analysis. Gemini and Groq both have a free tier with no card.
+                  </p>
+                  <div className="grid-cols-3">
+                    <div className="form-group">
+                      <label className="form-label">Provider</label>
+                      <select className="input-field" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
+                        <option value="gemini">Google Gemini — free</option>
+                        <option value="groq">Groq — free</option>
+                        <option value="openai">OpenAI — paid</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">API key</label>
+                      <input
+                        type="password"
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                        placeholder={hasAiKey ? '•••••••• (saved — leave blank to keep)' : 'Paste key'}
+                        className="input-field"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Model (optional)</label>
+                      <input
+                        type="text"
+                        value={aiModel}
+                        onChange={(e) => setAiModel(e.target.value)}
+                        placeholder={aiProvider === 'gemini' ? 'gemini-flash-latest' : aiProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini'}
+                        className="input-field"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.75rem' }}>
+                    Get a free key:{' '}
+                    {aiProvider === 'gemini' && <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>aistudio.google.com/apikey</a>}
+                    {aiProvider === 'groq' && <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>console.groq.com/keys</a>}
+                    {aiProvider === 'openai' && <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>platform.openai.com/api-keys</a>}
+                  </p>
                 </div>
 
                 {/* Platform Connections */}

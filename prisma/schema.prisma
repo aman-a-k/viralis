@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Video {
@@ -55,7 +56,12 @@ model Settings {
   id                    String   @id @default("default")
   youtubeId             String?
   instagramId           String?
-  openAiKey             String?
+  openAiKey             String?   // legacy — see aiApiKey
+
+  // AI provider (OpenAI-compatible). provider: "openai" | "gemini" | "groq"
+  aiProvider            String?   @default("gemini")
+  aiApiKey              String?
+  aiModel               String?
   
   // YouTube OAuth
   youtubeClientId       String?
@@ -91,10 +97,15 @@ model Project {
   id              String   @id @default(cuid())
   title           String
   sourceVideoUrl  String?
+  sourceVideoId   String?  // YouTube video id when sourceType == "youtube"
   sourceType      String   @default("upload") // "upload", "youtube", "drive", "zoom"
-  transcript      String?  // Diarized transcript / text
+  channel         String?
+  thumbnail       String?
+  transcript      String?  // Full caption transcript text
+  transcriptJson  String?  // JSON array of { text, start, end }
   duration        Float?   @default(0)
   status          String   @default("ready")  // "processing", "ready", "failed"
+  errorMessage    String?
   metadata        String?  // JSON string
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -111,6 +122,7 @@ model Clip {
   duration          Float
   viralityScore     Int      @default(85)
   reasoning         String
+  hookType          String?
   aspectRatios      String   @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
   transcriptSegment String
   captionVersions   String   // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
@@ -191,6 +203,7 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  passwordHash  String?
   accounts      Account[]
   sessions      Session[]
 }

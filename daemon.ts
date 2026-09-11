@@ -1,9 +1,7 @@
 import { WorkflowScheduler } from './src/services/scheduler';
 
-console.log("Starting AI Social Media Automator Daemon...");
+console.log('Starting Viralis autopilot daemon…');
 WorkflowScheduler.initCronJobs();
 
-// Keep process alive
 process.stdin.resume();
-
-console.log("Daemon is running in the background. Press Ctrl+C to exit.");
+console.log('Daemon running. Ctrl+C to exit.');

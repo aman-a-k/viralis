@@ -1,43 +1,65 @@
 import { NextResponse } from 'next/server';
+import { describeLlmError } from '@/lib/llm';
 import { RepurposingService } from '@/services/repurposingService';
-import fs from 'fs';
-import path from 'path';
+import { requireSession } from '@/lib/apiAuth';
 
+/**
+ * "Upload" now means: paste a transcript for analysis. Analyzing a raw video
+ * file requires the media worker (transcription + processing), which is not
+ * enabled on this deployment. YouTube links are handled by /api/repurpose.
+ */
 export async function POST(req: Request) {
-  try {
-    const formData = await req.formData();
-    const file = formData.get('video') as File | null;
-    const title = (formData.get('title') as string) || (file ? file.name.replace(/\.[^/.]+$/, '') : 'Uploaded Video Episode');
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
 
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'No video file provided' }, { status: 400 });
+  try {
+    const contentType = req.headers.get('content-type') || '';
+    let title = '';
+    let transcript = '';
+
+    if (contentType.includes('application/json')) {
+      const body = await req.json();
+      title = body.title || '';
+      transcript = body.transcript || body.transcriptText || '';
+    } else {
+      const form = await req.formData();
+      title = (form.get('title') as string) || '';
+      transcript = (form.get('transcript') as string) || '';
+      if (form.get('video')) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'Direct video-file analysis needs the media worker (transcription), which is not enabled here. Paste the transcript, or use a YouTube link.',
+          },
+          { status: 501 }
+        );
+      }
     }
 
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-    const safeFilename = `upload_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '')}`;
-    const destinationPath = path.join(uploadsDir, safeFilename);
-
-    const bytes = await file.arrayBuffer();
-    fs.writeFileSync(destinationPath, Buffer.from(bytes));
-
-    console.log(`[API /api/repurpose/upload] Video file uploaded: ${destinationPath} (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+    if (!transcript || transcript.trim().length < 200) {
+      return NextResponse.json(
+        { success: false, error: 'Paste a transcript of at least ~200 characters.' },
+        { status: 400 }
+      );
+    }
 
     const result = await RepurposingService.ingestVideo({
-      title,
-      uploadedFilePath: destinationPath,
-      sourceType: 'upload',
+      title: title || 'Pasted transcript',
+      transcriptText: transcript,
     });
 
     return NextResponse.json({
       success: true,
       project: result.project,
       clips: result.clips,
-      message: `Extracted and rendered ${result.clips.length} real video highlights!`,
+      message: `Analyzed the transcript — surfaced ${result.clips.length} clips.`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API /api/repurpose/upload] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: describeLlmError(error) },
+      { status: 500 }
+    );
   }
 }

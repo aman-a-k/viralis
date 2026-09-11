@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/apiAuth';
 
 export async function GET() {
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const videos = await prisma.video.findMany({
       orderBy: { createdAt: 'desc' }
@@ -110,8 +114,11 @@ export async function GET() {
         },
         settings: {
           instagramId: settings.instagramId || '',
-          hasOpenAi: !!settings.openAiKey,
-          openAiKey: settings.openAiKey || '',
+          aiProvider: (settings as { aiProvider?: string }).aiProvider || 'gemini',
+          hasAiKey: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          aiModel: (settings as { aiModel?: string }).aiModel || '',
+          hasOpenAi: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          openAiKey: '',
           youtubeClientId: settings.youtubeClientId || '',
           youtubeClientSecret: settings.youtubeClientSecret || '',
           hasYoutubeAuth: !!settings.youtubeRefreshToken,

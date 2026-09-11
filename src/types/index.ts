@@ -77,9 +77,10 @@ export interface ClipData {
   duration: number;
   viralityScore: number;
   reasoning: string;
+  hookType?: string | null;
   aspectRatios: string[];
   transcriptSegment: string;
-  captionVersions: PlatformCaptions;
+  captionVersions: PlatformCaptions | string;
   videoUrl?: string | null;
   status: 'candidate' | 'approved' | 'scheduled' | 'published' | 'rejected';
   createdAt: string;
@@ -90,10 +91,14 @@ export interface ProjectData {
   id: string;
   title: string;
   sourceVideoUrl?: string | null;
+  sourceVideoId?: string | null;
   sourceType: 'upload' | 'youtube' | 'drive' | 'zoom';
+  channel?: string | null;
+  thumbnail?: string | null;
   transcript?: string | null;
   duration?: number | null;
   status: 'processing' | 'ready' | 'failed';
+  errorMessage?: string | null;
   metadata?: string | null;
   createdAt: string;
   updatedAt: string;
