@@ -67,15 +67,6 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
               <button type="button" onClick={onSignIn} className="btn btn-primary" style={{ padding: '0.7rem 1.5rem', fontSize: '0.9375rem' }}>
                 Get started <ArrowRight size={15} />
               </button>
-              <a
-                href="https://github.com/aman-a-k/viralis"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-secondary"
-                style={{ padding: '0.7rem 1.5rem', fontSize: '0.9375rem' }}
-              >
-                <ExternalLink size={15} /> View on GitHub
-              </a>
             </div>
           </div>
         </div>
