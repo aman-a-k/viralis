@@ -1,72 +1,32 @@
-import cron from 'node-cron';
-import { prisma } from '../lib/prisma';
-import { Publisher } from './publisher';
 import { Orchestrator } from '../agents/orchestrator';
 
 export class WorkflowScheduler {
   private static orchestrator = new Orchestrator();
+  private static running = false;
 
-  static async runDailyJob(retryCount = 0) {
-    console.log("=======================================");
-    console.log(`[Scheduler] Starting Autonomous AI Workflow (Attempt: ${retryCount + 1})`);
-    console.log("=======================================");
+  static async runDailyJob(): Promise<{ success: boolean; message: string }> {
+    if (this.running) return { success: false, message: 'A workflow cycle is already running.' };
+    this.running = true;
+    console.log('[Scheduler] Autopilot workflow starting');
 
     try {
-      // Use the intelligent orchestrator to manage the end-to-end flow
-      await this.orchestrator.executeFullWorkflow();
-      
-      console.log("[Scheduler] Autonomous Workflow cycle completed.");
-
+      const result = await this.orchestrator.executeFullWorkflow();
+      console.log('[Scheduler] Cycle complete.');
+      return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[Scheduler] Workflow failed: ${errorMessage}`);
-      
-      if (retryCount < 3) {
-        const delay = Math.pow(2, retryCount) * 60000;
-        console.log(`[Scheduler] Auto-healing: Retrying workflow in ${delay / 60000} minutes...`);
-        setTimeout(() => this.runDailyJob(retryCount + 1), delay);
-      }
+      const { describeLlmError } = await import('../lib/llm');
+      const message = describeLlmError(error);
+      console.error(`[Scheduler] Workflow failed: ${message}`);
+      return { success: false, message };
+    } finally {
+      this.running = false;
     }
   }
 
-  static async runSelfHealer() {
-    console.log("[SelfHealer] Checking for failed or stuck tasks...");
-    const failedVideos = await prisma.video.findMany({
-      where: { status: 'failed' }
-    });
-
-    for (const video of failedVideos) {
-      console.log(`[SelfHealer] Attempting to re-publish failed video: ${video.topic}`);
-      try {
-        const published = await Publisher.publishVideo(
-          video.videoUrl,
-          `${video.topic} - You Won't Believe This! 🤯`,
-          `Re-upload attempt for ${video.topic}. #trending`
-        );
-        
-        if (published) {
-          await prisma.video.update({ where: { id: video.id }, data: { status: 'success' } });
-          console.log(`[SelfHealer] Successfully healed and published: ${video.topic}`);
-        } else {
-           console.log(`[SelfHealer] Failed again for: ${video.topic}. Will try again next cycle.`);
-        }
-      } catch (err) {
-        console.error(`[SelfHealer] Error healing video ${video.topic}:`, err);
-      }
-    }
-  }
-
-  static initCronJobs() {
-    // Run primary job daily at 08:00 AM
-    cron.schedule('0 8 * * *', () => {
-      this.runDailyJob();
-    });
-    
-    // Run self-healer every hour to verify if anything is not posted
-    cron.schedule('0 * * * *', () => {
-      this.runSelfHealer();
-    });
-    
-    console.log("[Scheduler] Cron jobs and Self-Healer initialized. Daemon running.");
+  /** Optional background daemon (not used by the web app). */
+  static async initCronJobs() {
+    const cron = (await import('node-cron')).default;
+    cron.schedule('0 8 * * *', () => this.runDailyJob());
+    console.log('[Scheduler] Daily autopilot cron registered (08:00).');
   }
 }

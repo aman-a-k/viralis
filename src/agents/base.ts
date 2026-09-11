@@ -1,5 +1,4 @@
-import OpenAI from 'openai';
-import { prisma } from '../lib/prisma';
+import { getLlmClient } from '../lib/llm';
 
 export interface AgentResponse {
   success: boolean;
@@ -9,7 +8,6 @@ export interface AgentResponse {
 }
 
 export abstract class BaseAgent {
-  protected openai: OpenAI | null = null;
   protected name: string;
   protected role: string;
 
@@ -18,55 +16,45 @@ export abstract class BaseAgent {
     this.role = role;
   }
 
-  protected async initOpenAI() {
-    if (this.openai) return;
-
-    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-    const apiKey = settings?.openAiKey || process.env.OPENAI_API_KEY;
-
-    if (!apiKey) {
-      throw new Error(`[${this.name}] OPENAI_API_KEY is not configured.`);
-    }
-
-    this.openai = new OpenAI({ apiKey });
-  }
-
-  /**
-   * The core "thinking" method of the agent.
-   * This should be implemented by subclasses to define how they process information.
-   */
   abstract run(input: any): Promise<AgentResponse>;
 
-  protected async chat(prompt: string, model: string = "gpt-4o", tools?: OpenAI.Chat.Completions.ChatCompletionTool[]): Promise<any> {
-    await this.initOpenAI();
-    if (!this.openai) throw new Error("OpenAI not initialized");
-
-    const response = await this.openai.chat.completions.create({
+  /** Plain-text completion. */
+  protected async chat(prompt: string): Promise<string> {
+    const { client, model } = await getLlmClient();
+    const res = await client.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: `You are ${this.name}, ${this.role}. You have access to tools that you can call to perform actions. Always aim for high-quality, viral results.` },
-        { role: "user", content: prompt }
+        { role: 'system', content: `You are ${this.name}, ${this.role}.` },
+        { role: 'user', content: prompt },
       ],
-      tools,
-      tool_choice: tools ? "auto" : undefined,
       temperature: 0.7,
     });
-
-    return response.choices[0].message;
+    return res.choices[0]?.message?.content || '';
   }
 
-  protected async executeTool(toolCall: any, toolHandlers: Record<string, Function>) {
-    const fn = toolCall.function || toolCall;
-    const name = fn.name;
-    const args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : fn.arguments;
-    
-    this.log(`Executing tool: ${name} with args: ${JSON.stringify(args)}`);
-    
-    if (toolHandlers[name]) {
-      return await toolHandlers[name](args);
+  /** JSON completion — asks for and parses a strict JSON object. */
+  protected async chatJSON<T = any>(prompt: string): Promise<T> {
+    const { client, model } = await getLlmClient();
+    const res = await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are ${this.name}, ${this.role}. Respond ONLY with a valid JSON object, no prose or code fences.`,
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    });
+    const raw = res.choices[0]?.message?.content || '{}';
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error(`[${this.name}] model returned non-JSON output.`);
+      return JSON.parse(m[0]) as T;
     }
-    
-    throw new Error(`Tool ${name} not found.`);
   }
 
   protected log(message: string) {

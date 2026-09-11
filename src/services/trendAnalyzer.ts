@@ -1,61 +1,87 @@
-// @ts-expect-error google-trends-api has no official type definitions
-import googleTrends from 'google-trends-api';
 import { TrendData } from '../types';
+import { getLlmClient } from '../lib/llm';
+import { prisma } from '../lib/prisma';
 
 export class TrendAnalyzer {
   /**
-   * Discovers daily trending topics using Google Trends API.
+   * Finds a trending topic for short-form video. Tries Google Trends first
+   * (best effort — the unofficial API is frequently blocked), then falls back
+   * to an LLM pass grounded in the workspace's niche.
    */
   static async getDailyTrend(): Promise<TrendData> {
-    console.log("[TrendAnalyzer] Fetching today's top trend from Google Trends...");
-    
+    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+    const niche = settings?.brandNiche || 'technology and internet culture';
+    const audience = settings?.targetAudience || 'a general social media audience';
+
+    // 1. Best-effort real trend from Google Trends RSS (no key, often works)
     try {
-      const today = new Date();
-      
-      const res = await googleTrends.dailyTrends({
-        trendDate: today,
-        geo: 'US',
+      const res = await fetch('https://trends.google.com/trending/rss?geo=US', {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
       });
-
-      const parsedData = JSON.parse(res);
-      const days = parsedData.default.trendingSearchesDays;
-      
-      if (!days || days.length === 0) {
-        throw new Error("No trends found");
+      if (res.ok) {
+        const xml = await res.text();
+        const titles = [...xml.matchAll(/<title>(?:<!\[CDATA\[)?([^<\]]+)(?:\]\]>)?<\/title>/g)]
+          .map((m) => m[1].trim())
+          .filter((t) => t && t !== 'Daily Search Trends' && t.length < 60);
+        if (titles.length > 3) {
+          const picked = await this.pickRelevant(titles.slice(0, 20), niche, audience);
+          if (picked) return picked;
+        }
       }
+    } catch {
+      /* fall through */
+    }
 
-      const topTrend = days[0].trendingSearches[0];
-      const topicTitle = topTrend.title.query;
-      
-      // Extract related keywords/articles
-      const relatedQueries = topTrend.relatedQueries.map((q: {query: string}) => q.query);
-      const articleTitles = topTrend.articles.map((a: {title: string}) => a.title).slice(0, 3);
-      
-      const keywords = [...new Set([...relatedQueries, ...articleTitles])].slice(0, 5) as string[];
-      
-      // If we don't get good keywords, add some generic viral ones
-      if (keywords.length < 3) {
-        keywords.push("viral", "trending", "news");
-      }
+    // 2. LLM-generated trend grounded in the niche
+    const { client, model } = await getLlmClient();
+    const res = await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: `Suggest ONE topic that is genuinely trending right now and would make a strong short-form video for ${audience} in the "${niche}" space. Return JSON: {"topic": string, "score": number (est. search interest 1-100), "keywords": string[5], "whyNow": string}`,
+        },
+      ],
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+    });
+    const data = JSON.parse(res.choices[0]?.message?.content || '{}');
+    return {
+      topic: data.topic || 'The state of AI in everyday life',
+      score: Math.min(100, Math.max(1, Number(data.score) || 80)),
+      keywords: Array.isArray(data.keywords) ? data.keywords.slice(0, 5) : ['trending', 'viral', 'news'],
+    };
+  }
 
-      console.log(`[TrendAnalyzer] Selected Real Trend: ${topicTitle}`);
-      
+  private static async pickRelevant(
+    candidates: string[],
+    niche: string,
+    audience: string
+  ): Promise<TrendData | null> {
+    try {
+      const { client, model } = await getLlmClient();
+      const res = await client.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'user',
+            content: `Trending searches today: ${candidates.join(', ')}.
+Pick the single best one for a short-form video aimed at ${audience} in "${niche}". Return JSON: {"topic": string, "score": number 1-100, "keywords": string[5]}`,
+          },
+        ],
+        temperature: 0.5,
+        response_format: { type: 'json_object' },
+      });
+      const d = JSON.parse(res.choices[0]?.message?.content || '{}');
+      if (!d.topic) return null;
       return {
-        topic: topicTitle,
-        score: parseInt(topTrend.formattedTraffic.replace(/[^0-9]/g, '')) || 100000,
-        keywords: keywords
+        topic: d.topic,
+        score: Math.min(100, Math.max(1, Number(d.score) || 75)),
+        keywords: Array.isArray(d.keywords) ? d.keywords.slice(0, 5) : [d.topic],
       };
-
-    } catch (error) {
-      console.error("[TrendAnalyzer] Error fetching real trend, falling back to AI generated topics...", error);
-      
-      // Fallback
-      const fallbackTrends = [
-        { topic: "AI in Everyday Life", score: 98000, keywords: ["ai", "future", "tech", "automation"] },
-        { topic: "SpaceX Mars Mission Update", score: 95000, keywords: ["spacex", "mars", "elon musk", "space"] },
-      ];
-
-      return fallbackTrends[Math.floor(Math.random() * fallbackTrends.length)];
+    } catch {
+      return null;
     }
   }
 }
