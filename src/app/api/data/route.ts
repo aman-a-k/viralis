@@ -122,7 +122,18 @@ export async function GET() {
           youtubeClientId: settings.youtubeClientId || '',
           youtubeClientSecret: settings.youtubeClientSecret || '',
           hasYoutubeAuth: !!settings.youtubeRefreshToken,
-          instagramAccessToken: settings.instagramAccessToken || ''
+          instagramAccessToken: settings.instagramAccessToken || '',
+          hasYoutubeDataKey: !!(settings as { youtubeDataApiKey?: string }).youtubeDataApiKey,
+          brandNiche: (settings as { brandNiche?: string }).brandNiche || 'Technology & AI',
+          captionStyle: (settings as { captionStyle?: string }).captionStyle || 'Dynamic Pop',
+          defaultPlatforms: (() => {
+            try { return JSON.parse((settings as { defaultPlatforms?: string }).defaultPlatforms || '[]'); }
+            catch { return ['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok']; }
+          })(),
+          defaultOrientations: (() => {
+            try { return JSON.parse((settings as { defaultOrientations?: string }).defaultOrientations || '[]'); }
+            catch { return ['9:16', '1:1', '16:9']; }
+          })(),
         },
         agents,
         trends,

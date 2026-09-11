@@ -8,14 +8,19 @@ export async function POST(req: Request) {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const { projectId, clipCount } = await req.json();
+    const { projectId, clipCount, platforms, orientations, captionStyle } = await req.json();
     if (!projectId) {
       return NextResponse.json({ success: false, error: 'projectId is required.' }, { status: 400 });
     }
 
     const result = await RepurposingService.reanalyzeProject(
       projectId,
-      Math.min(10, Math.max(3, Number(clipCount) || 5))
+      Math.min(10, Math.max(3, Number(clipCount) || 5)),
+      {
+        platforms: Array.isArray(platforms) && platforms.length ? platforms : undefined,
+        orientations: Array.isArray(orientations) && orientations.length ? orientations : undefined,
+        captionStyle,
+      }
     );
 
     return NextResponse.json({

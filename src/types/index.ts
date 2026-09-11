@@ -78,7 +78,7 @@ export interface ClipData {
   viralityScore: number;
   reasoning: string;
   hookType?: string | null;
-  aspectRatios: string[];
+  aspectRatios: string[] | string;
   transcriptSegment: string;
   captionVersions: PlatformCaptions | string;
   videoUrl?: string | null;

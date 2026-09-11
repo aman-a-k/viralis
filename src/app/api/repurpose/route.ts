@@ -32,7 +32,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { title, sourceVideoUrl, transcriptText, clipCount } = body;
+    const { title, sourceVideoUrl, transcriptText, clipCount, platforms, orientations, captionStyle } = body;
 
     if (!sourceVideoUrl && !transcriptText) {
       return NextResponse.json(
@@ -46,6 +46,9 @@ export async function POST(req: Request) {
       sourceVideoUrl,
       transcriptText,
       desiredClipCount: Math.min(10, Math.max(3, Number(clipCount) || 5)),
+      platforms: Array.isArray(platforms) && platforms.length ? platforms : undefined,
+      orientations: Array.isArray(orientations) && orientations.length ? orientations : undefined,
+      captionStyle,
     });
 
     return NextResponse.json({
