@@ -1,5 +1,14 @@
 import { prisma } from '../lib/prisma';
 
+export type VideoVibe = 'hook' | 'calm' | 'trendy' | 'story';
+
+export const VIBE_LABEL: Record<VideoVibe, string> = {
+  hook: 'Hook-heavy',
+  calm: 'Calm & informative',
+  trendy: 'Trendy & fast',
+  story: 'Story-driven',
+};
+
 export interface TrendingVideo {
   videoId: string;
   url: string;
@@ -11,6 +20,7 @@ export interface TrendingVideo {
   durationSeconds: number;
   publishedAt: string;
   categoryId: string;
+  vibe: VideoVibe;
 }
 
 export class MissingYouTubeKeyError extends Error {
@@ -81,18 +91,43 @@ export async function fetchTrendingVideos(opts: {
   const data = await res.json();
   const items: any[] = data.items || [];
 
-  return items.map((v) => ({
-    videoId: v.id,
-    url: `https://www.youtube.com/watch?v=${v.id}`,
-    title: v.snippet?.title || 'Untitled',
-    channelTitle: v.snippet?.channelTitle || 'Unknown channel',
-    thumbnail: v.snippet?.thumbnails?.medium?.url || v.snippet?.thumbnails?.default?.url || null,
-    viewCount: Number(v.statistics?.viewCount || 0),
-    likeCount: Number(v.statistics?.likeCount || 0),
-    durationSeconds: parseIsoDuration(v.contentDetails?.duration || 'PT0S'),
-    publishedAt: v.snippet?.publishedAt || '',
-    categoryId: v.snippet?.categoryId || '',
-  }));
+  return items.map((v) => {
+    const title: string = v.snippet?.title || 'Untitled';
+    const categoryId: string = v.snippet?.categoryId || '';
+    const durationSeconds = parseIsoDuration(v.contentDetails?.duration || 'PT0S');
+    return {
+      videoId: v.id,
+      url: `https://www.youtube.com/watch?v=${v.id}`,
+      title,
+      channelTitle: v.snippet?.channelTitle || 'Unknown channel',
+      thumbnail: v.snippet?.thumbnails?.medium?.url || v.snippet?.thumbnails?.default?.url || null,
+      viewCount: Number(v.statistics?.viewCount || 0),
+      likeCount: Number(v.statistics?.likeCount || 0),
+      durationSeconds,
+      publishedAt: v.snippet?.publishedAt || '',
+      categoryId,
+      vibe: classifyVibe(title, categoryId, durationSeconds),
+    };
+  });
+}
+
+/**
+ * Fast, free, no-LLM guess at a video's "vibe" so creators can filter by feel
+ * instead of raw metadata. Good enough for a first pass; never blocks on
+ * quota or latency.
+ */
+function classifyVibe(title: string, categoryId: string, durationSeconds: number): VideoVibe {
+  const t = title.toLowerCase();
+  const hookWords = ['you won\'t believe', 'shocking', 'secret', 'never', 'stop', 'nobody', 'truth', 'exposed', 'this is why', 'why i', '?', '!'];
+  const storyWords = ['story', 'happened', 'i tried', 'my experience', 'day in', 'vlog', 'journey', 'react'];
+
+  if (durationSeconds < 90) return 'trendy'; // shorts/clips, regardless of category
+  if (hookWords.some((w) => t.includes(w))) return 'hook';
+  if (['25', '23'].includes(categoryId) && durationSeconds < 240) return 'trendy'; // News/Comedy shorts
+  if (['10', '20'].includes(categoryId) && durationSeconds < 600) return 'trendy'; // short Music/Gaming clips
+  if (storyWords.some((w) => t.includes(w)) || ['22', '24', '20'].includes(categoryId)) return 'story'; // Vlogs/Entertainment/Gaming
+  if (['27', '28', '26'].includes(categoryId) || durationSeconds > 1800) return 'calm'; // Education/Science/Howto or long-form talking content
+  return 'story';
 }
 
 /** Picks the single best trending video for a niche using the workspace LLM. */
