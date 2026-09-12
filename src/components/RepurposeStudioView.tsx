@@ -6,7 +6,7 @@ import { ProjectData, ClipData } from '@/types';
 import {
   Scissors, Copy, Check, Send, Sparkles, RefreshCw, Video, ExternalLink,
   AlertTriangle, FileText, Radar, Smartphone, Square, Monitor, Eye, Rocket,
-  Link2, Flame, Coffee, TrendingUp, BookOpen,
+  Link2, Flame, Coffee, TrendingUp, BookOpen, Download,
 } from 'lucide-react';
 
 interface Props {
@@ -823,7 +823,8 @@ export function RepurposeStudioView({
                         <span className="badge badge-neutral">{fmt(clip.startTime)}–{fmt(clip.endTime)}</span>
                         <span className="badge badge-neutral">{clip.duration}s</span>
                         <span className="badge badge-primary">{humanizeHook(clip.hookType)}</span>
-                        {queued && <span className="badge badge-success"><Check size={10} /> In queue</span>}
+                        {queued && !clip.videoUrl && <span className="badge badge-success"><Check size={10} /> In queue</span>}
+                        {clip.videoUrl && <span className="badge badge-success"><Video size={10} /> Rendered</span>}
                         {parseAspectRatios(clip.aspectRatios).map((o: string) => (
                           <span key={o} className="badge badge-neutral">{o}</span>
                         ))}
@@ -869,10 +870,23 @@ export function RepurposeStudioView({
                     </div>
                   </div>
 
+                  {clip.videoUrl && (
+                    <video
+                      src={clip.videoUrl}
+                      controls
+                      style={{ width: '100%', maxHeight: 400, borderRadius: 'var(--radius-sm)', background: '#000' }}
+                    />
+                  )}
+
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     {ytLink && (
                       <a href={ytLink} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
                         <Video size={13} /> Play at {fmt(clip.startTime)}
+                      </a>
+                    )}
+                    {clip.videoUrl && (
+                      <a href={clip.videoUrl} target="_blank" rel="noreferrer" download className="btn btn-secondary btn-sm">
+                        <Download size={13} /> Download rendered clip
                       </a>
                     )}
                     <button className="btn btn-secondary btn-sm" onClick={() => copy(shotList(clip), `${clip.id}-shot`)}>
