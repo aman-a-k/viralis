@@ -26,7 +26,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       result,
-      message: `Picked "${result.video.title}" — ${result.clipsCreated} clips created, ${result.clipsQueued} queued for approval.`,
+      message: result.transcribing
+        ? `Picked "${result.video.title}" — transcribing the audio now (can take a few minutes)…`
+        : `Picked "${result.video.title}" — ${result.clipsCreated} clips created, ${result.clipsQueued} queued for approval.`,
     });
   } catch (error: unknown) {
     const status = error instanceof MissingYouTubeKeyError ? 424 : 500;

@@ -8,6 +8,9 @@ export interface AutomationResult {
   projectTitle: string;
   clipsCreated: number;
   clipsQueued: number;
+  /** True when transcription is still running in the background — the
+   * caller should poll /api/repurpose/poll with autoQueue:true. */
+  transcribing?: boolean;
 }
 
 /**
@@ -31,12 +34,24 @@ export async function runAutomaticDiscovery(
 
   const chosen = await pickBestForNiche(videos, niche);
 
-  const { project, clips } = await RepurposingService.ingestYouTube(chosen.url, config.clipCount ?? 5, {
+  const result = await RepurposingService.ingestYouTube(chosen.url, config.clipCount ?? 5, {
     platforms: config.platforms,
     orientations: config.orientations,
     captionStyle: config.captionStyle,
   });
 
+  if ('transcribing' in result && result.transcribing) {
+    return {
+      video: chosen,
+      projectId: result.project.id,
+      projectTitle: result.project.title,
+      clipsCreated: 0,
+      clipsQueued: 0,
+      transcribing: true,
+    };
+  }
+
+  const { project, clips } = result;
   let queued = 0;
   for (const clip of clips) {
     try {
