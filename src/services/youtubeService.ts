@@ -1,4 +1,5 @@
 import { YoutubeTranscript } from 'youtube-transcript';
+import { fetchTranscriptOnWorker } from '../lib/renderWorker';
 
 export interface TranscriptSegment {
   text: string;
@@ -108,6 +109,19 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
       }
     } catch {
       /* try next option set */
+    }
+  }
+
+  // Direct scraping from Vercel's serverless IPs regularly gets bot-walled by
+  // YouTube. If it's configured, the render worker's yt-dlp (proper client
+  // emulation + retries, running from a different IP) can usually still get
+  // the transcript.
+  if (transcript.length === 0) {
+    try {
+      const workerTranscript = await fetchTranscriptOnWorker(canonicalUrl);
+      if (workerTranscript?.length) transcript = workerTranscript;
+    } catch {
+      /* fall through to the "no captions" error below */
     }
   }
 
