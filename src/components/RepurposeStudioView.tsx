@@ -187,12 +187,24 @@ export function RepurposeStudioView({
     }
   };
 
+  // Auto-load trending videos the moment this tab is opened, instead of
+  // making the user press "Find trending videos" first — the button then
+  // doubles as a manual refresh (still honoring the region/category filters).
+  useEffect(() => {
+    if (mode === 'browse' && trendingVideos.length === 0 && !trendingLoading) {
+      findTrending();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   const visibleTrending = vibeFilter === 'all' ? trendingVideos : trendingVideos.filter((v) => v.vibe === vibeFilter);
 
-  const useTrendingVideo = (v: TrendingVideo) => {
+  // "Add to generator" — feeds the trending pick straight into the analyzer
+  // instead of just prefilling the link field.
+  const addTrendingToGenerator = (v: TrendingVideo) => {
     setMode('link');
     setUrl(v.url);
-    toast.success(`Loaded "${v.title}" — hit Analyze when ready.`);
+    ingestLink(v.url);
   };
 
   const startStatusCycle = () => {
@@ -301,27 +313,23 @@ export function RepurposeStudioView({
     }
   };
 
-  const analyze = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  // Shared by the "Paste a link" form and the trending cards' "Add to
+  // generator" button — both just feed a YouTube URL into the same pipeline.
+  const ingestLink = async (videoUrl: string) => {
     if (busy) return;
-    const isLink = tab === 'video';
-    if (isLink && !/youtube\.com|youtu\.be/.test(url)) {
+    if (!/youtube\.com|youtu\.be/.test(videoUrl)) {
       toast.error('Paste a valid YouTube link.');
-      return;
-    }
-    if (!isLink && transcript.trim().length < 200) {
-      toast.error('Paste a transcript of at least ~200 characters.');
       return;
     }
 
     setBusy(true);
     setLinkStatus('');
-    toast.loading(isLink ? 'Reading the video & finding highlights…' : 'Analyzing transcript…', { id: 'an' });
+    toast.loading('Reading the video & finding highlights…', { id: 'an' });
     try {
-      const res = await fetch(isLink ? '/api/repurpose' : '/api/repurpose/upload', {
+      const res = await fetch('/api/repurpose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isLink ? { sourceVideoUrl: url, ...runConfig() } : { transcript, ...runConfig() }),
+        body: JSON.stringify({ sourceVideoUrl: videoUrl, ...runConfig() }),
       });
       const data = await res.json();
       if (!data.success) {
@@ -331,7 +339,6 @@ export function RepurposeStudioView({
       }
 
       setUrl('');
-      setTranscript('');
       setSelectedProjectId(data.project.id);
       onRefresh();
 
@@ -355,6 +362,45 @@ export function RepurposeStudioView({
     } finally {
       setBusy(false);
       setLinkStatus('');
+    }
+  };
+
+  const analyze = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (busy) return;
+
+    if (tab === 'video') {
+      await ingestLink(url);
+      return;
+    }
+
+    if (transcript.trim().length < 200) {
+      toast.error('Paste a transcript of at least ~200 characters.');
+      return;
+    }
+
+    setBusy(true);
+    toast.loading('Analyzing transcript…', { id: 'an' });
+    try {
+      const res = await fetch('/api/repurpose/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript, ...runConfig() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || 'Done', { id: 'an', duration: 4000 });
+        setTranscript('');
+        setSelectedProjectId(data.project.id);
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Analysis failed', { id: 'an', duration: 7000 });
+        onRefresh();
+      }
+    } catch {
+      toast.error('Network error contacting the analyzer.', { id: 'an' });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -523,7 +569,7 @@ export function RepurposeStudioView({
                   </select>
                   <button type="button" className="btn btn-secondary" onClick={findTrending} disabled={trendingLoading}>
                     {trendingLoading ? <RefreshCw size={14} className="animate-spin" /> : <Radar size={14} />}
-                    {trendingLoading ? 'Finding…' : 'Find trending videos'}
+                    {trendingLoading ? 'Finding…' : trendingVideos.length > 0 ? 'Refresh' : 'Find trending videos'}
                   </button>
                 </div>
 
@@ -546,7 +592,7 @@ export function RepurposeStudioView({
                     {visibleTrending.map((v) => {
                       const VibeIcon = VIBE_ICON[v.vibe];
                       return (
-                        <div key={v.videoId} className="panel-card panel-card-interactive" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={() => useTrendingVideo(v)}>
+                        <div key={v.videoId} className="panel-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                           <div style={{ position: 'relative', height: 120, background: 'var(--bg-elevated)' }}>
                             {v.thumbnail && (
                               /* eslint-disable-next-line @next/next/no-img-element */
@@ -562,9 +608,30 @@ export function RepurposeStudioView({
                           <div style={{ padding: '0.65rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', flex: 1 }}>
                             <h4 style={{ fontSize: '0.78125rem', fontWeight: 600, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v.title}</h4>
                             <p className="text-subtle" style={{ fontSize: '0.7rem' }}>{v.channelTitle}</p>
-                            <p className="text-subtle" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: 'auto' }}>
+                            <p className="text-subtle" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                               <Eye size={11} /> {fmtViews(v.viewCount)}
                             </p>
+                            <div style={{ display: 'flex', gap: '0.4rem', marginTop: 'auto', paddingTop: '0.3rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                style={{ flex: 1, fontSize: '0.7rem' }}
+                                disabled={busy}
+                                onClick={() => addTrendingToGenerator(v)}
+                              >
+                                <Sparkles size={12} /> Add to generator
+                              </button>
+                              <a
+                                href={v.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '0.7rem' }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Video size={12} /> Watch
+                              </a>
+                            </div>
                           </div>
                         </div>
                       );
