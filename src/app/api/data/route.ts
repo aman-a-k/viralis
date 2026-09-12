@@ -115,7 +115,13 @@ export async function GET() {
         settings: {
           instagramId: settings.instagramId || '',
           aiProvider: (settings as { aiProvider?: string }).aiProvider || 'gemini',
-          hasAiKey: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          hasAiKey: !!(
+            (settings as { aiApiKey?: string }).aiApiKey ||
+            settings.openAiKey ||
+            process.env.GEMINI_API_KEY ||
+            process.env.GROQ_API_KEY ||
+            process.env.OPENAI_API_KEY
+          ),
           aiModel: (settings as { aiModel?: string }).aiModel || '',
           hasOpenAi: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
           openAiKey: '',
@@ -123,7 +129,9 @@ export async function GET() {
           youtubeClientSecret: settings.youtubeClientSecret || '',
           hasYoutubeAuth: !!settings.youtubeRefreshToken,
           instagramAccessToken: settings.instagramAccessToken || '',
-          hasYoutubeDataKey: !!(settings as { youtubeDataApiKey?: string }).youtubeDataApiKey,
+          hasYoutubeDataKey: !!(
+            (settings as { youtubeDataApiKey?: string }).youtubeDataApiKey || process.env.YOUTUBE_API_KEY
+          ),
           brandNiche: (settings as { brandNiche?: string }).brandNiche || 'Technology & AI',
           captionStyle: (settings as { captionStyle?: string }).captionStyle || 'Dynamic Pop',
           defaultPlatforms: (() => {
