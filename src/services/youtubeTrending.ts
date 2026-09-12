@@ -79,6 +79,7 @@ export async function fetchTrendingVideos(opts: {
 
   const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
     signal: AbortSignal.timeout(15000),
+    cache: 'no-store',
   });
 
   if (!res.ok) {

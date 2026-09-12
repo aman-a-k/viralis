@@ -156,7 +156,7 @@ app.post('/render', async (req, res) => {
     console.error('[render] failed:', err?.stderr?.toString?.() || err?.message || err);
     res.status(500).json({
       success: false,
-      error: `Render failed: ${err?.message || 'unknown error'}`,
+      error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
     });
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -253,12 +253,39 @@ async function runTranscriptionJob(jobId, youtubeUrl) {
     console.error(`[transcript ${jobId}] failed:`, err?.stderr?.toString?.() || err?.message || err);
     transcriptJobs.set(jobId, {
       status: 'error',
-      error: `Transcription failed: ${err?.message || 'unknown error'}`,
+      error: describeWorkerError(err, 'Transcribing this video failed. Try a different video.'),
       updatedAt: Date.now(),
     });
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Turns a raw yt-dlp/ffmpeg/whisper failure (command line + stderr dump,
+ * meaningless to an end user and potentially leaking internal paths) into a
+ * short, human-readable message. Full details still go to console.error for
+ * debugging — this is only what gets stored on the Project/Clip and shown
+ * in the UI.
+ */
+function describeWorkerError(err, fallback) {
+  const raw = String(err?.stderr?.toString?.() || err?.message || err || '');
+  if (/cookies are no longer valid|cookies.*rotated|Sign in to confirm/i.test(raw)) {
+    return 'YouTube is requiring a signed-in session for this video, and the connected account session has expired. An administrator needs to refresh it.';
+  }
+  if (/Video unavailable/i.test(raw)) {
+    return 'This video is unavailable or has been removed.';
+  }
+  if (/Private video/i.test(raw)) {
+    return "This video is private and can't be accessed.";
+  }
+  if (/429|Too Many Requests/i.test(raw)) {
+    return 'YouTube is rate-limiting requests right now. Try again in a few minutes.';
+  }
+  if (/ETIMEDOUT|ENOTFOUND|ECONNRESET|network/i.test(raw)) {
+    return 'A network error interrupted processing. Try again.';
+  }
+  return fallback;
 }
 
 // YouTube blocks anonymous requests from cloud IPs outright (429/403) and,
