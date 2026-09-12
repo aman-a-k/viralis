@@ -23,7 +23,7 @@ import express from 'express';
 import { put } from '@vercel/blob';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, rm, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -43,7 +43,18 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
 // Anonymous requests from cloud IPs are blocked outright; authenticated ones
 // get a separate, much higher rate limit. Optional — falls back to anonymous
 // (and will likely fail) if not present, so local/dev keeps working.
-const COOKIES_PATH = '/etc/secrets/yt-cookies.txt';
+//
+// Render mounts secret files read-only, but yt-dlp rewrites its cookie jar
+// after every use (Google rotates session cookies as a security measure) —
+// so the secret is copied once, at startup, to a writable path. That copy
+// then self-maintains its own rotation across requests for as long as this
+// instance stays up.
+const SECRET_COOKIES_PATH = '/etc/secrets/yt-cookies.txt';
+const COOKIES_PATH = path.join(tmpdir(), 'yt-cookies-writable.txt');
+if (existsSync(SECRET_COOKIES_PATH)) {
+  await copyFile(SECRET_COOKIES_PATH, COOKIES_PATH);
+  console.log('[startup] copied yt-cookies.txt to a writable path for yt-dlp');
+}
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
