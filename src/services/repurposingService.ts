@@ -7,6 +7,7 @@ import {
   renderWorkerConfigured,
   startTranscriptJob,
   getTranscriptJobStatus,
+  warmUpWorker,
 } from '../lib/renderWorker';
 
 export interface RunConfig {
@@ -64,6 +65,12 @@ export class RepurposingService {
   }
 
   static async ingestYouTube(url: string, desiredClipCount = 5, config: RunConfig = {}) {
+    // Direct transcript fetch usually fails (YouTube blocks it from cloud
+    // IPs) and falls back to the worker — start waking it from Render's
+    // free-tier idle spin-down now, in parallel with that doomed attempt,
+    // instead of paying the full cold-start cost only once we know we need it.
+    if (renderWorkerConfigured()) warmUpWorker();
+
     let video;
     try {
       video = await fetchYouTubeVideo(url);

@@ -8,6 +8,19 @@ export function renderWorkerConfigured(): boolean {
   return Boolean(process.env.RENDER_WORKER_URL && process.env.RENDER_WORKER_SECRET);
 }
 
+/**
+ * Fire-and-forget ping to start waking up the worker if Render's free tier
+ * has spun it down (idle >~15min). Callers should invoke this as early as
+ * possible — in parallel with other work like a trending-video fetch or LLM
+ * call — so the ~30-60s cold-start overlaps with work that's happening
+ * anyway, instead of being paid in full right before a real request.
+ */
+export function warmUpWorker(): void {
+  const url = process.env.RENDER_WORKER_URL;
+  if (!url) return;
+  fetch(`${url.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(55_000) }).catch(() => {});
+}
+
 export interface RenderJob {
   clipId: string;
   youtubeUrl: string;
@@ -76,11 +89,13 @@ export async function startTranscriptJob(youtubeUrl: string): Promise<string | n
   const secret = process.env.RENDER_WORKER_SECRET;
   if (!url || !secret) return null;
 
+  // Render's free tier spins down after ~15 minutes idle and can take 30-60s
+  // to wake back up, so this first call needs real headroom, not a quick fail.
   const res = await fetch(`${url.replace(/\/$/, '')}/transcript/start`, {
     method: 'POST',
     headers: workerHeaders(secret),
     body: JSON.stringify({ youtubeUrl }),
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(55_000),
   });
 
   const data = await res.json().catch(() => ({}));

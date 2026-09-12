@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { fetchTrendingVideos, pickBestForNiche, type TrendingVideo } from './youtubeTrending';
 import { RepurposingService, type RunConfig } from './repurposingService';
+import { warmUpWorker } from '../lib/renderWorker';
 
 export interface AutomationResult {
   video: TrendingVideo;
@@ -22,6 +23,11 @@ export interface AutomationResult {
 export async function runAutomaticDiscovery(
   config: RunConfig & { clipCount?: number; region?: string; category?: string } = {}
 ): Promise<AutomationResult> {
+  // Kick this off now, in parallel with the trending fetch + LLM pick below —
+  // if the transcript worker needs waking from Render's free-tier idle spin-
+  // down, it gets a head start instead of eating the whole wait later.
+  warmUpWorker();
+
   const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
   const niche = settings?.brandNiche || 'technology and internet culture';
 
