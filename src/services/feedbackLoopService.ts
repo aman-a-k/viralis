@@ -106,6 +106,10 @@ export class FeedbackLoopService {
     }
 
     return {
+      // No real Metric rows yet means every number below is illustrative
+      // sample data (what this dashboard will show once content has real
+      // published performance), not this account's actual results.
+      isSampleData: metrics.length === 0,
       overallWatchThrough: avgWatchThrough,
       highPerformingHooks: [
         "Open loops stating an uncomfortable contrarian truth (88% retention)",

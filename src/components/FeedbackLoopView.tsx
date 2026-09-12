@@ -42,6 +42,7 @@ export function FeedbackLoopView() {
   }
 
   const {
+    isSampleData = true,
     overallWatchThrough = 74,
     highPerformingHooks = [],
     underperformingClips = [],
@@ -56,6 +57,15 @@ export function FeedbackLoopView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {isSampleData && (
+        <div className="panel-card" style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', borderColor: 'var(--yellow-line, #f59e0b40)' }}>
+          <HelpCircle size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)' }}>
+            <strong>Sample data.</strong> This account has no published-content performance metrics yet, so every number and chart below is illustrative — a preview of what this dashboard shows once clips have real views and watch-through data.
+          </p>
+        </div>
+      )}
+
       {/* Overview Banner */}
       <div className="panel-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-subtle) 100%)' }}>
         <div>
@@ -90,9 +100,6 @@ export function FeedbackLoopView() {
           <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
             {overallWatchThrough}%
           </p>
-          <span className="badge badge-success" style={{ marginTop: '0.35rem', fontSize: '0.6875rem' }}>
-            +14.2% Above Platform Average
-          </span>
         </div>
 
         <div className="panel-card">
@@ -319,7 +326,7 @@ export function FeedbackLoopView() {
               <div style={{ marginTop: '0.85rem', display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
-                  onClick={() => toast.success('Auto-cut task scheduled!')}
+                  onClick={() => toast('Auto-cutting from a suggested angle isn’t built yet — open the project in Repurpose Studio to cut it manually.', { icon: 'ℹ️', duration: 6000 })}
                   className="btn btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                 >

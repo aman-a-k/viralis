@@ -397,7 +397,7 @@ export default function Dashboard() {
               <p className="text-muted" style={{ fontSize: '0.8125rem', marginTop: '0.35rem', maxWidth: '620px' }}>
                 {activeTab === 'overview' && "Video repurposing, autonomous generation, and performance learning at a glance."}
                 {activeTab === 'repurpose' && "Turn long-form video into high-retention 9:16 shorts with automatic reframing and dynamic subtitles."}
-                {activeTab === 'autopilot' && "Scan Google Trends and autonomously write, voice, and produce short-form videos."}
+                {activeTab === 'autopilot' && "Scan trends and autonomously write a script, then send it to your Approval Queue for review."}
                 {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
                 {activeTab === 'learning-loop' && "Closed-loop audience retention metrics and dynamic highlight re-weighting."}
                 {activeTab === 'trends' && "Real-time Google Trends signals and back-catalog matching."}
@@ -602,14 +602,14 @@ export default function Dashboard() {
               <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Autopilot Trend Videos</h3>
-                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>AI generated scripts, b-roll footage, and voiceover rendered with FFmpeg.</p>
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>AI-written scripts sent to your Approval Queue for review — video rendering isn&apos;t built for autopilot content yet.</p>
                 </div>
                 <span className="badge badge-neutral">{videos.length} Videos</span>
               </div>
 
               {videos.length === 0 ? (
                 <div style={{ padding: '3.5rem', textAlign: 'center' }}>
-                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No videos in the library yet. Click &quot;Run Autopilot Cycle&quot; to begin.</p>
+                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No videos in the library yet. Click &quot;Run Autopilot&quot; to begin.</p>
                 </div>
               ) : (
                 <div className="grid-cols-3" style={{ padding: '1.25rem' }}>

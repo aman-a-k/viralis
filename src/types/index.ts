@@ -140,6 +140,10 @@ export interface TrendSignalData {
 }
 
 export interface FeedbackLoopData {
+  /** True when there's no real published-content performance data yet, so
+   * every figure below is illustrative sample data, not the account's own
+   * results. */
+  isSampleData: boolean;
   overallWatchThrough: number;
   highPerformingHooks: string[];
   underperformingClips: {
