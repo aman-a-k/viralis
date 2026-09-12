@@ -48,3 +48,36 @@ export async function renderClipOnWorker(job: RenderJob): Promise<string> {
   }
   return data.videoUrl as string;
 }
+
+export interface WorkerTranscriptSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Fetches a video's transcript via the worker's yt-dlp-based /transcript
+ * route. Vercel's serverless IPs get bot-walled by YouTube for direct
+ * scraping; the worker's yt-dlp client-emulation gets past it. Returns null
+ * (rather than throwing) when the worker isn't configured, so callers can
+ * fall back to the direct methods.
+ */
+export async function fetchTranscriptOnWorker(youtubeUrl: string): Promise<WorkerTranscriptSegment[] | null> {
+  const url = process.env.RENDER_WORKER_URL;
+  const secret = process.env.RENDER_WORKER_SECRET;
+  if (!url || !secret) return null;
+
+  const res = await fetch(`${url.replace(/\/$/, '')}/transcript`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ youtubeUrl }),
+    signal: AbortSignal.timeout(55_000),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) return null;
+  return (data.transcript as WorkerTranscriptSegment[]) || null;
+}
