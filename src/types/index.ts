@@ -97,7 +97,7 @@ export interface ProjectData {
   thumbnail?: string | null;
   transcript?: string | null;
   duration?: number | null;
-  status: 'processing' | 'ready' | 'failed';
+  status: 'processing' | 'transcribing' | 'ready' | 'failed';
   errorMessage?: string | null;
   metadata?: string | null;
   createdAt: string;

@@ -117,8 +117,9 @@ model Project {
   transcript      String?  // Full caption transcript text
   transcriptJson  String?  // JSON array of { text, start, end }
   duration        Float?   @default(0)
-  status          String   @default("ready")  // "processing", "ready", "failed"
+  status          String   @default("ready")  // "processing", "transcribing", "ready", "failed"
   errorMessage    String?
+  transcriptJobId String?  // worker job id while status == "transcribing"
   metadata        String?  // JSON string
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

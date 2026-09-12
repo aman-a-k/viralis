@@ -7,6 +7,14 @@
 // captions with ffmpeg, uploads the result to Vercel Blob, and returns the
 // public URL synchronously.
 //
+// Also runs transcription: YouTube now blocks anonymous automated access to
+// both video and captions, and even authenticated (cookie) requests can't
+// get captions past a proof-of-origin token requirement. So instead of
+// asking YouTube for captions, this worker downloads the audio (which does
+// work with cookies) and transcribes it itself with whisper.cpp. That's
+// slow for long videos — far past what a single HTTP request can wait on —
+// so transcription runs as a background job the main app polls for.
+//
 // Auth: every request must carry `Authorization: Bearer <WORKER_SECRET>`
 // matching the WORKER_SECRET env var here (same value goes into the Next.js
 // app's RENDER_WORKER_SECRET).
@@ -16,7 +24,9 @@ import { put } from '@vercel/blob';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
@@ -26,6 +36,14 @@ app.use(express.json({ limit: '2mb' }));
 const PORT = process.env.PORT || 8080;
 const WORKER_SECRET = process.env.WORKER_SECRET || '';
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const WHISPER_BIN = process.env.WHISPER_BIN || 'whisper-cli';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
+
+// A YouTube cookies.txt (Netscape format), added as a Render "Secret File".
+// Anonymous requests from cloud IPs are blocked outright; authenticated ones
+// get a separate, much higher rate limit. Optional — falls back to anonymous
+// (and will likely fail) if not present, so local/dev keeps working.
+const COOKIES_PATH = '/etc/secrets/yt-cookies.txt';
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -134,22 +152,126 @@ app.post('/render', async (req, res) => {
   }
 });
 
-// YouTube's web-scraping defenses block a lot of cloud/datacenter IPs and,
-// separately, yt-dlp's default (web) client needs a JS runtime to solve
-// signature challenges that this image doesn't have. The android/ios player
-// clients skip that JS step entirely and are usually left alone longer, so
-// try them first and only fall back to the plain web client. On top of that,
-// retry with backoff since YouTube's rate limiting (429) is often transient.
-const YT_DLP_CLIENTS = ['android', 'ios', 'web'];
+// --- Transcription (background job) ---------------------------------------
+//
+// Transcribing a full video with whisper.cpp on a free-tier CPU can take far
+// longer than any single HTTP request should wait, so this is a fire-and-poll
+// job: POST /transcript/start kicks it off and returns immediately, GET
+// /transcript/status/:jobId reports progress. Jobs live in memory only —
+// fine for a single always-on instance, but lost on a restart/redeploy.
+const transcriptJobs = new Map();
+const JOB_TIMEOUT_MS = 20 * 60 * 1000; // hard ceiling per transcription
+const JOB_RETENTION_MS = 60 * 60 * 1000; // how long a finished job's result is kept
+
+function pruneOldJobs() {
+  const now = Date.now();
+  for (const [id, job] of transcriptJobs) {
+    if (job.status !== 'processing' && now - job.updatedAt > JOB_RETENTION_MS) {
+      transcriptJobs.delete(id);
+    }
+  }
+}
+
+app.post('/transcript/start', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  if (!WHISPER_MODEL) {
+    return res.status(500).json({ success: false, error: 'WHISPER_MODEL is not set on the worker.' });
+  }
+
+  const { youtubeUrl } = req.body || {};
+  if (!youtubeUrl) {
+    return res.status(400).json({ success: false, error: 'youtubeUrl is required.' });
+  }
+
+  pruneOldJobs();
+  const jobId = randomUUID();
+  transcriptJobs.set(jobId, { status: 'processing', updatedAt: Date.now() });
+  runTranscriptionJob(jobId, youtubeUrl);
+  res.json({ success: true, jobId });
+});
+
+app.get('/transcript/status/:jobId', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  const job = transcriptJobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ success: false, error: 'Unknown or expired job id.' });
+  }
+  if (job.status === 'processing') return res.json({ success: true, status: 'processing' });
+  if (job.status === 'error') return res.json({ success: true, status: 'error', error: job.error });
+  res.json({ success: true, status: 'done', transcript: job.transcript });
+});
+
+async function runTranscriptionJob(jobId, youtubeUrl) {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-whisper-'));
+  const outBase = path.join(workDir, 'transcript');
+  try {
+    console.log(`[transcript ${jobId}]: downloading audio for ${youtubeUrl}`);
+    await runYtDlpWithRetry(
+      ['--no-playlist', '-f', 'bestaudio/best', '-o', path.join(workDir, 'audio.%(ext)s'), youtubeUrl],
+      `transcript-audio ${jobId}`
+    );
+
+    const files = await readdir(workDir);
+    const audioFile = files.find((f) => f.startsWith('audio.'));
+    if (!audioFile) throw new Error('yt-dlp did not produce an audio file.');
+
+    const wavPath = path.join(workDir, 'audio.wav');
+    console.log(`[transcript ${jobId}]: converting to 16kHz mono wav`);
+    await execFileAsync(
+      'ffmpeg',
+      ['-y', '-i', path.join(workDir, audioFile), '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
+      { timeout: 5 * 60 * 1000 }
+    );
+
+    console.log(`[transcript ${jobId}]: transcribing with whisper.cpp (this can take a while)`);
+    await execFileAsync(
+      WHISPER_BIN,
+      ['-m', WHISPER_MODEL, '-f', wavPath, '-l', 'en', '-ovtt', '-of', outBase],
+      { timeout: JOB_TIMEOUT_MS, maxBuffer: 1024 * 1024 * 20 }
+    );
+
+    const vtt = await readFile(`${outBase}.vtt`, 'utf8');
+    const transcript = parseVtt(vtt);
+    transcriptJobs.set(jobId, {
+      status: transcript.length ? 'done' : 'error',
+      transcript,
+      error: transcript.length ? undefined : 'No speech detected in this video.',
+      updatedAt: Date.now(),
+    });
+  } catch (err) {
+    console.error(`[transcript ${jobId}] failed:`, err?.stderr?.toString?.() || err?.message || err);
+    transcriptJobs.set(jobId, {
+      status: 'error',
+      error: `Transcription failed: ${err?.message || 'unknown error'}`,
+      updatedAt: Date.now(),
+    });
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// YouTube blocks anonymous requests from cloud IPs outright (429/403) and,
+// separately, the default web client needs a JS runtime to solve signature
+// challenges this image doesn't have. With cookies attached, only client
+// types that support authenticated sessions are usable (yt-dlp silently
+// skips android/ios otherwise), so we only try "web" in that case; without
+// cookies (local/dev), try android/ios first since they skip the JS-runtime
+// step and are trusted longer. Either way, retry with backoff since 429s can
+// be transient.
+function ytDlpClientsFor(hasCookies) {
+  return hasCookies ? ['web'] : ['android', 'ios', 'web'];
+}
 
 async function runYtDlpWithRetry(args, label) {
+  const hasCookies = existsSync(COOKIES_PATH);
+  const cookieArgs = hasCookies ? ['--cookies', COOKIES_PATH] : [];
   let lastErr;
-  for (const client of YT_DLP_CLIENTS) {
+  for (const client of ytDlpClientsFor(hasCookies)) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await execFileAsync(
           'yt-dlp',
-          ['--extractor-args', `youtube:player_client=${client}`, ...args],
+          [...cookieArgs, '--extractor-args', `youtube:player_client=${client}`, ...args],
           { timeout: 8 * 60 * 1000, maxBuffer: 1024 * 1024 * 20 }
         );
       } catch (err) {
@@ -163,105 +285,6 @@ async function runYtDlpWithRetry(args, label) {
     }
   }
   throw lastErr;
-}
-
-// Fetches the real transcript via yt-dlp's own subtitle extraction instead of
-// hitting YouTube's timedtext endpoint directly — yt-dlp's client-emulation
-// and retry logic gets past bot detection that a plain fetch can't, and it's
-// the same mechanism the render step above already relies on.
-app.post('/transcript', async (req, res) => {
-  if (!checkAuth(req, res)) return;
-
-  const { youtubeUrl } = req.body || {};
-  if (!youtubeUrl) {
-    return res.status(400).json({ success: false, error: 'youtubeUrl is required.' });
-  }
-
-  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-sub-'));
-  try {
-    await runYtDlpWithRetry(
-      [
-        '--no-playlist',
-        '--skip-download',
-        '--write-auto-sub',
-        '--write-sub',
-        '--sub-langs', 'en.*,en',
-        '--sub-format', 'vtt/best',
-        '--convert-subs', 'vtt',
-        '-o', path.join(workDir, 'sub.%(ext)s'),
-        youtubeUrl,
-      ],
-      'transcript'
-    );
-
-    const files = await readdir(workDir);
-    const vttFile = files.find((f) => f.endsWith('.vtt'));
-    if (!vttFile) {
-      return res.status(404).json({
-        success: false,
-        error: 'No captions available for this video.',
-      });
-    }
-
-    const vtt = await readFile(path.join(workDir, vttFile), 'utf8');
-    const transcript = parseVtt(vtt);
-    if (!transcript.length) {
-      return res.status(404).json({ success: false, error: 'No captions available for this video.' });
-    }
-
-    res.json({ success: true, transcript });
-  } catch (err) {
-    console.error('[transcript] failed:', err?.stderr?.toString?.() || err?.message || err);
-    res.status(500).json({
-      success: false,
-      error: `Transcript fetch failed: ${err?.message || 'unknown error'}`,
-    });
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
-  }
-});
-
-function vttTimeToSeconds(t) {
-  const [h, m, s] = t.split(':');
-  return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseFloat(s);
-}
-
-/** Parses a WebVTT file into plain timestamped segments, deduping the
- * roll-up repeats common in YouTube's auto-generated captions. */
-function parseVtt(vtt) {
-  const lines = vtt.replace(/\r/g, '').split('\n');
-  const timeRe = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/;
-  const segments = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(timeRe);
-    if (!m) continue;
-    const start = vttTimeToSeconds(m[1]);
-    const end = vttTimeToSeconds(m[2]);
-    const textLines = [];
-    i++;
-    while (i < lines.length && lines[i].trim() !== '') {
-      textLines.push(lines[i]);
-      i++;
-    }
-    const text = textLines
-      .join(' ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (text) segments.push({ text, start, end: end || start + 3 });
-  }
-
-  const deduped = [];
-  for (const seg of segments) {
-    const prev = deduped[deduped.length - 1];
-    if (prev && prev.text === seg.text) {
-      prev.end = seg.end;
-      continue;
-    }
-    deduped.push(seg);
-  }
-  return deduped;
 }
 
 const SCALE_CROP = {
@@ -311,6 +334,49 @@ function buildAss(text, durationSeconds, aspectRatio, style) {
     if (t >= durationSeconds) break;
   }
   return header + lines;
+}
+
+function vttTimeToSeconds(t) {
+  const [h, m, s] = t.split(':');
+  return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseFloat(s);
+}
+
+/** Parses a WebVTT file (whisper.cpp's -ovtt output) into plain timestamped
+ * segments. */
+function parseVtt(vtt) {
+  const lines = vtt.replace(/\r/g, '').split('\n');
+  const timeRe = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/;
+  const segments = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(timeRe);
+    if (!m) continue;
+    const start = vttTimeToSeconds(m[1]);
+    const end = vttTimeToSeconds(m[2]);
+    const textLines = [];
+    i++;
+    while (i < lines.length && lines[i].trim() !== '') {
+      textLines.push(lines[i]);
+      i++;
+    }
+    const text = textLines
+      .join(' ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text) segments.push({ text, start, end: end || start + 3 });
+  }
+
+  const deduped = [];
+  for (const seg of segments) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.text === seg.text) {
+      prev.end = seg.end;
+      continue;
+    }
+    deduped.push(seg);
+  }
+  return deduped;
 }
 
 app.listen(PORT, () => {

@@ -1,8 +1,13 @@
 import { prisma } from '../lib/prisma';
 import { analyzeTranscript, MissingApiKeyError, type AnalyzedClip, type AnalyzeOptions } from './analyzerService';
-import { fetchYouTubeVideo, isYouTubeUrl } from './youtubeService';
+import { fetchYouTubeVideo, fetchYouTubeMetadata, isYouTubeUrl, type TranscriptSegment } from './youtubeService';
 import { describeLlmError } from '../lib/llm';
-import { renderClipOnWorker } from '../lib/renderWorker';
+import {
+  renderClipOnWorker,
+  renderWorkerConfigured,
+  startTranscriptJob,
+  getTranscriptJobStatus,
+} from '../lib/renderWorker';
 
 export interface RunConfig {
   /** Platforms to generate captions for. Defaults to all five. */
@@ -59,7 +64,18 @@ export class RepurposingService {
   }
 
   static async ingestYouTube(url: string, desiredClipCount = 5, config: RunConfig = {}) {
-    const video = await fetchYouTubeVideo(url);
+    let video;
+    try {
+      video = await fetchYouTubeVideo(url);
+    } catch (err) {
+      // Direct transcript fetch failed — almost always YouTube's bot detection
+      // blocking this from a cloud IP. If the render worker is configured, it
+      // can transcribe the audio itself (as a background job, since that can
+      // take far longer than this request should wait). Otherwise, surface
+      // the original error.
+      if (!renderWorkerConfigured()) throw err;
+      return this.ingestYouTubeAsync(url, desiredClipCount, config);
+    }
 
     const project = await prisma.project.create({
       data: {
@@ -88,7 +104,7 @@ export class RepurposingService {
         where: { id: project.id },
         data: { status: 'ready' },
       });
-      return { project: updated, clips };
+      return { project: updated, clips, transcribing: false as const };
     } catch (err) {
       const message = err instanceof MissingApiKeyError ? err.message : describeLlmError(err);
       await prisma.project.update({
@@ -100,6 +116,126 @@ export class RepurposingService {
           ? `Fetched the transcript for "${video.title}", but ${message}`
           : message
       );
+    }
+  }
+
+  /**
+   * Creates the Project from metadata alone and kicks off worker-side
+   * transcription as a background job. The project sits in status
+   * "transcribing" until pollTranscription() picks up the finished result.
+   */
+  private static async ingestYouTubeAsync(url: string, desiredClipCount: number, config: RunConfig) {
+    const meta = await fetchYouTubeMetadata(url);
+    const jobId = await startTranscriptJob(meta.url);
+    if (!jobId) {
+      throw new Error('Could not start transcription — the render worker is not reachable.');
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        title: meta.title,
+        sourceVideoUrl: meta.url,
+        sourceVideoId: meta.videoId,
+        sourceType: 'youtube',
+        channel: meta.author,
+        thumbnail: meta.thumbnail,
+        status: 'transcribing',
+        transcriptJobId: jobId,
+        metadata: JSON.stringify({ desiredClipCount, config, ingestedAt: new Date().toISOString() }),
+      },
+    });
+
+    return { project, clips: [] as never[], transcribing: true as const };
+  }
+
+  /**
+   * Checks a worker transcription job and, once it finishes, runs analysis
+   * and persists clips — same end state as the synchronous ingestYouTube
+   * path, just split across polls. Safe to call repeatedly; once the project
+   * is out of "transcribing" it just returns the current state.
+   */
+  static async pollTranscription(projectId: string, options: { autoQueue?: boolean } = {}) {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new Error('Project not found.');
+
+    if (project.status !== 'transcribing') {
+      const clips = await prisma.clip.findMany({ where: { projectId }, orderBy: { viralityScore: 'desc' } });
+      return { status: project.status as 'processing' | 'ready' | 'failed', project, clips };
+    }
+    if (!project.transcriptJobId) {
+      throw new Error('This project has no transcription job to check.');
+    }
+
+    const jobStatus = await getTranscriptJobStatus(project.transcriptJobId);
+    if (jobStatus.status === 'processing') {
+      return { status: 'transcribing' as const, project, clips: [] as never[] };
+    }
+    if (jobStatus.status === 'error') {
+      const updated = await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'failed', errorMessage: jobStatus.error },
+      });
+      return { status: 'failed' as const, project: updated, clips: [] as never[] };
+    }
+
+    // done — build the same "video" shape analyzeTranscript expects and finish exactly like the sync path.
+    const segments: TranscriptSegment[] = jobStatus.transcript;
+    const fullText = segments.map((s) => s.text).join(' ');
+    const durationSeconds = segments.length ? Math.ceil(segments[segments.length - 1].end) : 0;
+
+    let meta: { desiredClipCount?: number; config?: RunConfig } = {};
+    try {
+      meta = project.metadata ? JSON.parse(project.metadata) : {};
+    } catch {
+      /* ignore malformed metadata, use defaults */
+    }
+
+    const video = {
+      videoId: project.sourceVideoId || '',
+      url: project.sourceVideoUrl || '',
+      title: project.title,
+      author: project.channel || 'Unknown',
+      description: '',
+      durationSeconds,
+      thumbnail: project.thumbnail,
+      transcript: segments,
+      fullText,
+      transcriptSource: 'captions' as const,
+    };
+
+    try {
+      const highlights = await analyzeTranscript(video, meta.desiredClipCount ?? 5, meta.config ?? {});
+      const clips = await this.persistClips(projectId, highlights, meta.config ?? {});
+      const updated = await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'ready',
+          duration: durationSeconds,
+          transcript: fullText,
+          transcriptJson: JSON.stringify(segments),
+        },
+      });
+
+      let queued = 0;
+      if (options.autoQueue) {
+        for (const clip of clips) {
+          try {
+            await this.queueClip(clip.id);
+            queued += 1;
+          } catch {
+            /* keep going even if one clip fails to queue */
+          }
+        }
+      }
+
+      return { status: 'ready' as const, project: updated, clips, queued };
+    } catch (err) {
+      const message = err instanceof MissingApiKeyError ? err.message : describeLlmError(err);
+      const updated = await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'failed', errorMessage: message },
+      });
+      return { status: 'failed' as const, project: updated, clips: [] as never[] };
     }
   }
 

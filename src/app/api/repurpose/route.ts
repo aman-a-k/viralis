@@ -54,6 +54,15 @@ export async function POST(req: Request) {
       captionStyle,
     });
 
+    if ('transcribing' in result && result.transcribing) {
+      return NextResponse.json({
+        success: true,
+        transcribing: true,
+        project: result.project,
+        message: `Fetched "${result.project.title}" — transcribing the audio now (can take a few minutes for longer videos)…`,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       project: result.project,
