@@ -9,19 +9,18 @@ interface Props {
 
 export const AgentStatusView: React.FC<Props> = ({ agents }) => {
   const [command, setCommand] = useState('');
-  const [isSending, setIsSending] = useState(false);
 
   const handleSendCommand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!command.trim()) return;
-    setIsSending(true);
-    toast.loading('Dispatching instruction to agent cluster...', { id: 'agent-cmd' });
-
-    setTimeout(() => {
-      setIsSending(false);
-      toast.success(`Instruction received by agents: "${command}"`, { id: 'agent-cmd', duration: 4000 });
-      setCommand('');
-    }, 1000);
+    // There's no backend for arbitrary natural-language agent commands —
+    // the real agents only run through the fixed "Run Autopilot" workflow
+    // (Repurpose Studio / Autopilot Generator). Say so rather than faking
+    // a dispatch that nothing receives.
+    toast('Free-form agent dispatch isn’t built yet — use Run Autopilot or Repurpose Studio to trigger the real pipeline.', {
+      icon: 'ℹ️',
+      duration: 6000,
+    });
   };
 
   return (
@@ -118,7 +117,7 @@ export const AgentStatusView: React.FC<Props> = ({ agents }) => {
             className="input-field" 
             style={{ flex: 1 }}
           />
-          <button type="submit" disabled={isSending} className="btn btn-primary">
+          <button type="submit" className="btn btn-primary">
             <Send size={15} /> Dispatch
           </button>
         </form>
