@@ -55,29 +55,54 @@ export interface WorkerTranscriptSegment {
   end: number;
 }
 
+export type TranscriptJobStatus =
+  | { status: 'processing' }
+  | { status: 'done'; transcript: WorkerTranscriptSegment[] }
+  | { status: 'error'; error: string };
+
+function workerHeaders(secret: string) {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` };
+}
+
 /**
- * Fetches a video's transcript via the worker's yt-dlp-based /transcript
- * route. Vercel's serverless IPs get bot-walled by YouTube for direct
- * scraping; the worker's yt-dlp client-emulation gets past it. Returns null
- * (rather than throwing) when the worker isn't configured, so callers can
- * fall back to the direct methods.
+ * Starts a background transcription job on the worker (it downloads the
+ * audio and transcribes it with whisper.cpp — YouTube's caption endpoint now
+ * blocks this entirely, even with cookies). Returns the job id immediately;
+ * poll with getTranscriptJobStatus. Returns null if the worker isn't
+ * configured, so callers can fall back to the direct/synchronous methods.
  */
-export async function fetchTranscriptOnWorker(youtubeUrl: string): Promise<WorkerTranscriptSegment[] | null> {
+export async function startTranscriptJob(youtubeUrl: string): Promise<string | null> {
   const url = process.env.RENDER_WORKER_URL;
   const secret = process.env.RENDER_WORKER_SECRET;
   if (!url || !secret) return null;
 
-  const res = await fetch(`${url.replace(/\/$/, '')}/transcript`, {
+  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/start`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${secret}`,
-    },
+    headers: workerHeaders(secret),
     body: JSON.stringify({ youtubeUrl }),
-    signal: AbortSignal.timeout(55_000),
+    signal: AbortSignal.timeout(20_000),
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) return null;
-  return (data.transcript as WorkerTranscriptSegment[]) || null;
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
+  }
+  return data.jobId as string;
+}
+
+export async function getTranscriptJobStatus(jobId: string): Promise<TranscriptJobStatus> {
+  const url = process.env.RENDER_WORKER_URL;
+  const secret = process.env.RENDER_WORKER_SECRET;
+  if (!url || !secret) throw new RenderWorkerNotConfiguredError();
+
+  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/status/${jobId}`, {
+    headers: workerHeaders(secret),
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
+  }
+  return data as TranscriptJobStatus;
 }

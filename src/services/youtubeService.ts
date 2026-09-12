@@ -1,5 +1,4 @@
 import { YoutubeTranscript } from 'youtube-transcript';
-import { fetchTranscriptOnWorker } from '../lib/renderWorker';
 
 export interface TranscriptSegment {
   text: string;
@@ -52,23 +51,30 @@ function decodeEntities(s: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+export interface YouTubeMetadata {
+  videoId: string;
+  url: string;
+  title: string;
+  author: string;
+  thumbnail: string | null;
+}
+
 /**
- * Fetches real metadata + the real caption transcript for a YouTube video.
- * No video download — uses the public oEmbed endpoint plus the caption track.
+ * Fetches just title/author/thumbnail via the public oEmbed endpoint — no
+ * transcript, so it never fails due to missing captions. Used to create a
+ * Project immediately while transcription runs as a background job.
  */
-export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> {
+export async function fetchYouTubeMetadata(url: string): Promise<YouTubeMetadata> {
   const videoId = extractVideoId(url);
   if (!videoId) {
     throw new Error('Could not parse a YouTube video ID from that link.');
   }
 
   const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
   let title = 'Untitled video';
   let author = 'Unknown';
   let thumbnail: string | null = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
-  // --- Metadata via oEmbed (no key, reliable) ---
   try {
     const res = await fetch(
       `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`,
@@ -86,6 +92,19 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
     if (err instanceof Error && /private|unavailable|link is wrong/.test(err.message)) throw err;
     // metadata is best-effort; continue
   }
+
+  return { videoId, url: canonicalUrl, title, author, thumbnail };
+}
+
+/**
+ * Fetches real metadata + the real caption transcript for a YouTube video.
+ * No video download — uses the public oEmbed endpoint plus the caption track.
+ * Throws if no transcript is reachable this way (YouTube regularly blocks
+ * this from cloud IPs) — callers should fall back to worker-based
+ * transcription (see RepurposingService.ingestYouTube) when that happens.
+ */
+export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> {
+  const { videoId, url: canonicalUrl, title, author, thumbnail } = await fetchYouTubeMetadata(url);
 
   // --- Real caption transcript (English-first) ---
   let transcript: TranscriptSegment[] = [];
@@ -109,19 +128,6 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
       }
     } catch {
       /* try next option set */
-    }
-  }
-
-  // Direct scraping from Vercel's serverless IPs regularly gets bot-walled by
-  // YouTube. If it's configured, the render worker's yt-dlp (proper client
-  // emulation + retries, running from a different IP) can usually still get
-  // the transcript.
-  if (transcript.length === 0) {
-    try {
-      const workerTranscript = await fetchTranscriptOnWorker(canonicalUrl);
-      if (workerTranscript?.length) transcript = workerTranscript;
-    } catch {
-      /* fall through to the "no captions" error below */
     }
   }
 

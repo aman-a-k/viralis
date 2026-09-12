@@ -63,6 +63,10 @@ const AUTOMATIC_STATUSES = [
   'Sending clips to your queue…',
 ];
 
+const TRANSCRIBING_STATUS = 'Transcribing the audio — this can take a few minutes for longer videos…';
+const POLL_INTERVAL_MS = 6000;
+const POLL_TIMEOUT_MS = 25 * 60 * 1000; // matches the worker's own job ceiling
+
 interface TrendingVideo {
   videoId: string; url: string; title: string; channelTitle: string; thumbnail: string | null;
   viewCount: number; durationSeconds: number; vibe: Vibe;
@@ -137,6 +141,7 @@ export function RepurposeStudioView({
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [platform, setPlatform] = useState<Platform>('instagram');
   const [copiedKey, setCopiedKey] = useState<string>('');
+  const [linkStatus, setLinkStatus] = useState('');
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) || projects[0],
@@ -203,6 +208,45 @@ export function RepurposeStudioView({
     statusTimer.current = null;
   };
 
+  // Shared by both the automatic and manual-link flows: when the analyzer's
+  // direct transcript fetch gets blocked by YouTube, ingestion falls back to
+  // worker-side whisper.cpp transcription, which runs as a background job
+  // (it can take far longer than any single request should wait on). This
+  // polls until it finishes, fails, or we give up waiting.
+  const pollProject = async (
+    projectId: string,
+    opts: { autoQueue?: boolean; onTick?: () => void } = {}
+  ): Promise<
+    | { ok: true; status: 'ready'; project: ProjectData; clips: ClipData[]; queued?: number }
+    | { ok: true; status: 'failed'; error: string }
+    | { ok: false; error: string }
+  > => {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const res = await fetch('/api/repurpose/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, autoQueue: opts.autoQueue }),
+        });
+        const data = await res.json();
+        if (!data.success) return { ok: false, error: data.error || 'Polling failed.' };
+        if (data.status === 'transcribing') {
+          opts.onTick?.();
+          continue;
+        }
+        if (data.status === 'failed') {
+          return { ok: true, status: 'failed', error: data.project?.errorMessage || 'Transcription failed.' };
+        }
+        return { ok: true, status: 'ready', project: data.project, clips: data.clips, queued: data.queued };
+      } catch {
+        // transient network error mid-poll — keep trying until the deadline
+      }
+    }
+    return { ok: false, error: 'This is taking longer than expected. Check back in a few minutes — it may still finish in the background.' };
+  };
+
   const runAutomatic = async () => {
     setAutomating(true);
     setLastAutoResult(null);
@@ -214,19 +258,41 @@ export function RepurposeStudioView({
         body: JSON.stringify({ ...runConfig(), region, category: category || undefined }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (!data.success) {
+        toast.error(data.error || 'Automatic run failed.', { duration: 8000 });
+        return;
+      }
+
+      if (data.result.transcribing) {
+        stopStatusCycle();
+        setAutoStatus(TRANSCRIBING_STATUS);
+        const polled = await pollProject(data.result.projectId, { autoQueue: true });
+        if (!polled.ok || polled.status === 'failed') {
+          toast.error((!polled.ok ? polled.error : polled.error) || 'Transcription failed.', { duration: 8000 });
+          onRefresh();
+          return;
+        }
         toast.success('Done — clips are in your Approval Queue.', { duration: 5000 });
         setLastAutoResult({
-          title: data.result.video.title,
-          channel: data.result.video.channelTitle,
-          clipsCreated: data.result.clipsCreated,
-          clipsQueued: data.result.clipsQueued,
+          title: polled.project.title,
+          channel: polled.project.channel || '',
+          clipsCreated: polled.clips.length,
+          clipsQueued: polled.queued ?? polled.clips.length,
         });
-        setSelectedProjectId(data.result.projectId);
+        setSelectedProjectId(polled.project.id);
         onRefresh();
-      } else {
-        toast.error(data.error || 'Automatic run failed.', { duration: 8000 });
+        return;
       }
+
+      toast.success('Done — clips are in your Approval Queue.', { duration: 5000 });
+      setLastAutoResult({
+        title: data.result.video.title,
+        channel: data.result.video.channelTitle,
+        clipsCreated: data.result.clipsCreated,
+        clipsQueued: data.result.clipsQueued,
+      });
+      setSelectedProjectId(data.result.projectId);
+      onRefresh();
     } catch {
       toast.error('Network error running automatic discovery.');
     } finally {
@@ -249,6 +315,7 @@ export function RepurposeStudioView({
     }
 
     setBusy(true);
+    setLinkStatus('');
     toast.loading(isLink ? 'Reading the video & finding highlights…' : 'Analyzing transcript…', { id: 'an' });
     try {
       const res = await fetch(isLink ? '/api/repurpose' : '/api/repurpose/upload', {
@@ -257,20 +324,37 @@ export function RepurposeStudioView({
         body: JSON.stringify(isLink ? { sourceVideoUrl: url, ...runConfig() } : { transcript, ...runConfig() }),
       });
       const data = await res.json();
-      if (data.success) {
-        toast.success(data.message || 'Done', { id: 'an', duration: 4000 });
-        setUrl('');
-        setTranscript('');
-        setSelectedProjectId(data.project.id);
-        onRefresh();
-      } else {
+      if (!data.success) {
         toast.error(data.error || 'Analysis failed', { id: 'an', duration: 7000 });
         onRefresh();
+        return;
       }
+
+      setUrl('');
+      setTranscript('');
+      setSelectedProjectId(data.project.id);
+      onRefresh();
+
+      if (data.transcribing) {
+        toast.loading(data.message || TRANSCRIBING_STATUS, { id: 'an' });
+        setLinkStatus(TRANSCRIBING_STATUS);
+        const polled = await pollProject(data.project.id, { autoQueue: false });
+        if (!polled.ok || polled.status === 'failed') {
+          toast.error((!polled.ok ? polled.error : polled.error) || 'Transcription failed.', { id: 'an', duration: 8000 });
+          onRefresh();
+          return;
+        }
+        toast.success(`Analyzed "${polled.project.title}" — surfaced ${polled.clips.length} clips.`, { id: 'an', duration: 4000 });
+        onRefresh();
+        return;
+      }
+
+      toast.success(data.message || 'Done', { id: 'an', duration: 4000 });
     } catch {
       toast.error('Network error contacting the analyzer.', { id: 'an' });
     } finally {
       setBusy(false);
+      setLinkStatus('');
     }
   };
 
@@ -309,6 +393,31 @@ export function RepurposeStudioView({
       if (data.success) onRefresh();
     } catch {
       toast.error('Network error.', { id: 'q' });
+    }
+  };
+
+  // One-shot check for a project that's stuck showing "transcribing" after a
+  // page refresh (the active poll loop only lives for the tab that started
+  // it) — lets the user manually pull the latest status instead of waiting.
+  const checkTranscription = async (projectId: string) => {
+    toast.loading('Checking…', { id: 'chk' });
+    try {
+      const res = await fetch('/api/repurpose/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        toast.error(data.error || 'Check failed.', { id: 'chk' });
+        return;
+      }
+      if (data.status === 'transcribing') toast('Still transcribing — check back shortly.', { id: 'chk' });
+      else if (data.status === 'failed') toast.error(data.project?.errorMessage || 'Transcription failed.', { id: 'chk' });
+      else toast.success(`Ready — ${data.clips?.length || 0} clips.`, { id: 'chk' });
+      onRefresh();
+    } catch {
+      toast.error('Network error.', { id: 'chk' });
     }
   };
 
@@ -466,19 +575,24 @@ export function RepurposeStudioView({
             )}
 
             {mode === 'link' && (
-              <form onSubmit={analyze} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <input
-                  className="input-field"
-                  style={{ flex: '1 1 320px' }}
-                  placeholder="https://www.youtube.com/watch?v=…"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                />
-                <button type="submit" className="btn btn-primary" disabled={busy} style={{ minWidth: 150 }}>
-                  {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  {busy ? 'Analyzing…' : 'Analyze'}
-                </button>
-              </form>
+              <>
+                <form onSubmit={analyze} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <input
+                    className="input-field"
+                    style={{ flex: '1 1 320px' }}
+                    placeholder="https://www.youtube.com/watch?v=…"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={busy} style={{ minWidth: 150 }}>
+                    {busy ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {busy ? 'Analyzing…' : 'Analyze'}
+                  </button>
+                </form>
+                {linkStatus && (
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>{linkStatus}</p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -576,7 +690,7 @@ export function RepurposeStudioView({
               <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.35rem' }}>
                 {activeProject?.channel && `${activeProject.channel} · `}
                 {activeProject?.duration ? `${fmt(activeProject.duration)} · ` : ''}
-                {clips.length} clips
+                {activeProject?.status === 'transcribing' ? 'Transcribing…' : `${clips.length} clips`}
                 {activeProject?.status === 'failed' && (
                   <span style={{ color: 'var(--red)' }}> · {activeProject.errorMessage || 'analysis failed'}</span>
                 )}
@@ -598,6 +712,18 @@ export function RepurposeStudioView({
             <div className="panel-card" style={{ borderColor: 'var(--red-line)', display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
               <AlertTriangle size={16} style={{ color: 'var(--red)', flexShrink: 0, marginTop: 2 }} />
               <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)' }}>{activeProject.errorMessage}</p>
+            </div>
+          )}
+
+          {activeProject?.status === 'transcribing' && (
+            <div className="panel-card" style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+              <RefreshCw size={16} className="animate-spin" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)', flex: 1 }}>
+                Transcribing the audio — this can take a few minutes for longer videos.
+              </p>
+              <button className="btn btn-secondary btn-sm" onClick={() => checkTranscription(activeProject.id)}>
+                Check now
+              </button>
             </div>
           )}
 
