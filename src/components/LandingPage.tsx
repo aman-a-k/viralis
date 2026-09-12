@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { Zap, Scissors, Sparkles, Brain, ClipboardCheck, ArrowRight, ExternalLink } from 'lucide-react';
+import { Zap, Scissors, Sparkles, Brain, ClipboardCheck, ArrowRight } from 'lucide-react';
 
 interface LandingPageProps {
   onSignIn: () => void;
@@ -108,14 +108,6 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
 
       <footer className="landing-footer">
         <span>© {new Date().getFullYear()} Viralis. AI Video Repurposing &amp; Distribution.</span>
-        <a
-          href="https://github.com/aman-a-k/viralis"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: 'var(--foreground-subtle)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-        >
-          <ExternalLink size={14} /> Source
-        </a>
       </footer>
     </div>
   );
