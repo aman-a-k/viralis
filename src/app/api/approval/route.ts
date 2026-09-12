@@ -43,7 +43,10 @@ export async function POST(req: Request) {
         }
       }
 
-      // No source clip, or no worker connected yet.
+      // No source clip — this is an Autopilot-generated script, which has no
+      // video to cut. The render worker only cuts YouTube clips; there's no
+      // script -> voiceover -> video pipeline yet, so don't claim otherwise
+      // just because that (unrelated) worker happens to be configured.
       if (!item.clipId) {
         await prisma.video.create({ data: { topic: item.topic, videoUrl: '', platform: 'both', status: 'pending' } });
       }
@@ -52,9 +55,11 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: renderWorkerConfigured()
-          ? 'Approved. Queued for rendering.'
-          : 'Approved. Connect the render worker (see worker/README.md) to produce the actual video file.',
+        message: item.clipId
+          ? (renderWorkerConfigured()
+              ? 'Approved. Queued for rendering.'
+              : 'Approved. Connect the render worker (see worker/README.md) to produce the actual video file.')
+          : 'Approved. Autopilot video generation (script → voiceover → render) isn’t built yet, so this stays pending — the script and captions are saved for now.',
       });
     }
 
