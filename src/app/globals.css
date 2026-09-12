@@ -272,7 +272,7 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
 
 .app-container {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 232px minmax(0, 1fr);
   flex: 1;
   min-height: calc(100vh - 56px);
 }
@@ -394,9 +394,9 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
 /* ============================================================
    STAT CARD
    ============================================================ */
-.grid-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; }
-@media (max-width: 1180px) { .grid-metrics { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 540px) { .grid-metrics { grid-template-columns: 1fr; } }
+.grid-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.85rem; }
+@media (max-width: 1180px) { .grid-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { .grid-metrics { grid-template-columns: minmax(0, 1fr); } }
 
 .stat-card {
   background: var(--surface);
@@ -496,9 +496,9 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
 .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
 .form-label { font-size: 0.75rem; font-weight: 550; color: var(--text-2); }
 
-.grid-cols-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-.grid-cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-@media (max-width: 900px) { .grid-cols-2, .grid-cols-3 { grid-template-columns: 1fr; } }
+.grid-cols-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.grid-cols-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 900px) { .grid-cols-2, .grid-cols-3 { grid-template-columns: minmax(0, 1fr); } }
 
 /* ============================================================
    PANEL (header + body composite)
@@ -633,7 +633,7 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
 }
 
 @media (max-width: 768px) {
-  .app-container { grid-template-columns: 1fr; }
+  .app-container { grid-template-columns: minmax(0, 1fr); }
   .top-header { padding: 0 0.75rem; }
   .header-search { display: none; }
   .mobile-nav-toggle { display: inline-flex; }
@@ -728,11 +728,11 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
 }
 .landing-features {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
 }
-@media (max-width: 900px) { .landing-features { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 520px) { .landing-features { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .landing-features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .landing-features { grid-template-columns: minmax(0, 1fr); } }
 .landing-feature-card {
   background: var(--surface);
   border: 1px solid var(--border);
