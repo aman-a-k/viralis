@@ -147,17 +147,14 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    toast.loading('Saving Viralis configuration...', { id: 'settings' });
+  const saveSettings = async (toastId?: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          youtubeId: ytId, 
-          instagramId: igId, 
+        body: JSON.stringify({
+          youtubeId: ytId,
+          instagramId: igId,
           aiProvider,
           aiApiKey: aiApiKey || undefined,
           aiModel: aiModel || undefined,
@@ -181,14 +178,22 @@ export default function Dashboard() {
       });
       const responseData = await res.json();
       if (responseData.success) {
-        toast.success("Configuration saved successfully!", { id: 'settings' });
+        if (toastId) toast.success("Configuration saved successfully!", { id: toastId });
         fetchData();
-      } else {
-        toast.error("Failed to save settings.", { id: 'settings' });
+        return true;
       }
+      if (toastId) toast.error("Failed to save settings.", { id: toastId });
+      return false;
     } catch (err) {
-      toast.error("Error saving settings.", { id: 'settings' });
+      if (toastId) toast.error("Error saving settings.", { id: toastId });
+      return false;
     }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    toast.loading('Saving Viralis configuration...', { id: 'settings' });
+    await saveSettings('settings');
   };
 
   const goToTab = (tab: string) => {
@@ -196,11 +201,22 @@ export default function Dashboard() {
     setMobileNavOpen(false);
   };
 
-  const handleYoutubeLogin = () => {
+  const handleYoutubeLogin = async () => {
     if (!ytClientId || !ytClientSecret) {
-      toast.error("Save your GCP Client ID and Client Secret first!");
+      toast.error("Add your GCP Client ID and Client Secret first!");
       return;
     }
+    // The OAuth route reads these from the saved Settings row, not from
+    // whatever's currently typed in the form — save first so a client
+    // ID/secret typed but not yet saved doesn't send the user into an
+    // OAuth flow that then fails with "missing credentials".
+    toast.loading('Saving credentials before connecting…', { id: 'yt-oauth' });
+    const saved = await saveSettings();
+    if (!saved) {
+      toast.error('Could not save your credentials — try again.', { id: 'yt-oauth' });
+      return;
+    }
+    toast.dismiss('yt-oauth');
     window.location.href = '/api/auth/youtube';
   };
 
