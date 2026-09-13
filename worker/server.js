@@ -237,7 +237,7 @@ async function runTranscriptionJob(jobId, youtubeUrl) {
     console.log(`[transcript ${jobId}]: transcribing with whisper.cpp (this can take a while)`);
     await execFileAsync(
       WHISPER_BIN,
-      ['-m', WHISPER_MODEL, '-f', wavPath, '-l', 'en', '-ovtt', '-of', outBase],
+      ['-m', WHISPER_MODEL, '-f', wavPath, '-l', 'en', '-t', '1', '-ovtt', '-of', outBase],
       { timeout: JOB_TIMEOUT_MS, maxBuffer: 1024 * 1024 * 20 }
     );
 

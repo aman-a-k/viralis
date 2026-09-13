@@ -8,6 +8,10 @@ FROM node:20-slim
 # signature challenge on the web client — without it, downloads fail with
 # "n challenge solving failed" / "No video formats found!" even with valid
 # cookies (unzip is only needed to install the deno binary itself).
+# The full-precision tiny.en model needs ~390MB RAM to run, which was getting
+# silently OOM-killed on Render's 512MB free tier once Node's and ffmpeg's own
+# overhead were added on top — the q5_1 quantized model uses roughly half
+# that, at a small (acceptable for tiny.en) accuracy cost.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 \
@@ -25,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && cmake --build /opt/whisper.cpp/build -j --config Release --target whisper-cli \
     && cp /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli \
     && mkdir -p /opt/whisper-models \
-    && sh /opt/whisper.cpp/models/download-ggml-model.sh tiny.en /opt/whisper-models \
+    && sh /opt/whisper.cpp/models/download-ggml-model.sh tiny.en-q5_1 /opt/whisper-models \
     && rm -rf /opt/whisper.cpp/build/CMakeFiles /opt/whisper.cpp/.git \
     && apt-get remove -y build-essential cmake git unzip \
     && apt-get autoremove -y \
@@ -38,6 +42,6 @@ COPY server.js ./
 
 ENV PORT=8080
 ENV WHISPER_BIN=/usr/local/bin/whisper-cli
-ENV WHISPER_MODEL=/opt/whisper-models/ggml-tiny.en.bin
+ENV WHISPER_MODEL=/opt/whisper-models/ggml-tiny.en-q5_1.bin
 EXPOSE 8080
 CMD ["npm", "start"]
