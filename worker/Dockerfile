@@ -4,16 +4,22 @@ FROM node:20-slim
 # build-essential/cmake/git to compile whisper.cpp (self-hosted transcription —
 # YouTube's caption endpoint now requires a proof-of-origin token that neither
 # cookies nor plain scraping can produce, so we transcribe the audio ourselves).
+# Deno is yt-dlp's recommended external JS runtime for solving YouTube's "n"
+# signature challenge on the web client — without it, downloads fail with
+# "n challenge solving failed" / "No video formats found!" even with valid
+# cookies (unzip is only needed to install the deno binary itself).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 \
       curl \
+      unzip \
       ca-certificates \
       git \
       build-essential \
       cmake \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- --yes \
     && git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git /opt/whisper.cpp \
     && cmake -B /opt/whisper.cpp/build -S /opt/whisper.cpp -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /opt/whisper.cpp/build -j --config Release --target whisper-cli \
@@ -21,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /opt/whisper-models \
     && sh /opt/whisper.cpp/models/download-ggml-model.sh tiny.en /opt/whisper-models \
     && rm -rf /opt/whisper.cpp/build/CMakeFiles /opt/whisper.cpp/.git \
-    && apt-get remove -y build-essential cmake git \
+    && apt-get remove -y build-essential cmake git unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
