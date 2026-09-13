@@ -182,6 +182,17 @@ export class RepurposingService {
         where: { id: projectId },
         data: { status: 'failed', errorMessage: jobStatus.error },
       });
+      // The one failure mode that needs a human to actually do something
+      // (re-export the worker's YouTube cookies) — alert proactively rather
+      // than letting it surface only as a UI error someone has to notice.
+      if (/signed-in session|cookies/i.test(jobStatus.error)) {
+        const { NotificationService } = await import('./notifications');
+        await NotificationService.sendDiscordNotification(
+          'YouTube session expired',
+          `Transcription for "${project.title}" failed: the render worker's YouTube cookies need to be refreshed. Export a fresh cookies.txt and update the worker's Secret File.`,
+          'error'
+        );
+      }
       return { status: 'failed' as const, project: updated, clips: [] as never[] };
     }
 
