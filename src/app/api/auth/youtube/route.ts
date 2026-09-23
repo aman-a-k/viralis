@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server';
+import { randomBytes } from 'crypto';
 import { google } from 'googleapis';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/apiAuth';
+
+const YT_OAUTH_STATE_COOKIE = 'yt_oauth_state';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const host = url.host;
-  const protocol = url.protocol;
-  const redirectUri = `${protocol}//${host}/api/auth/youtube/callback`;
+  const auth = await requireSession();
+  if (auth instanceof NextResponse) {
+    return NextResponse.redirect(`${url.origin}/auth/signin`);
+  }
+
+  const redirectUri = `${url.origin}/api/auth/youtube/callback`;
 
   const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
 
@@ -20,14 +27,25 @@ export async function GET(req: Request) {
     redirectUri
   );
 
+  const state = randomBytes(32).toString('hex');
+
   const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline', // Request a refresh token
-    prompt: 'consent', // Force consent screen to ensure refresh token is given
+    access_type: 'offline',
+    prompt: 'consent',
+    state,
     scope: [
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly'
     ],
   });
 
-  return NextResponse.redirect(authUrl);
+  const res = NextResponse.redirect(authUrl);
+  res.cookies.set(YT_OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: url.protocol === 'https:',
+    sameSite: 'lax',
+    path: '/api/auth/youtube',
+    maxAge: 10 * 60,
+  });
+  return res;
 }
