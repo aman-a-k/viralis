@@ -11,12 +11,12 @@ const FEATURES = [
   {
     icon: Scissors,
     title: 'Repurpose Studio',
-    description: 'Turn one long-form video into ten high-retention 9:16 shorts with automated face tracking and dynamic subtitles.',
+    description: 'Paste a YouTube link and get the strongest moments as ready-to-post shorts — cut, reframed to 9:16, captioned, with copy written for each platform.',
   },
   {
     icon: Sparkles,
     title: 'Autopilot Generator',
-    description: 'Scan trending topics and autonomously write, voice, and render 4K short-form videos — no editing required.',
+    description: 'Scan what’s trending in your niche and get a ready-to-shoot script, hook, and SEO metadata for a new short.',
   },
   {
     icon: ClipboardCheck,
@@ -59,9 +59,9 @@ export function LandingPage({ onSignIn }: LandingPageProps) {
             </span>
             <h1>Go viral, on autopilot.</h1>
             <p>
-              Viralis turns long-form video into a self-optimizing content engine — automatically
-              extracting viral highlights, reframing to 9:16 with dynamic captions, and learning
-              from performance data with every publish.
+              Viralis turns long-form video into short-form content — finding the strongest
+              moments, reframing them to 9:16 with captions, writing copy for every platform,
+              and showing you what actually performs.
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button type="button" onClick={onSignIn} className="btn btn-primary" style={{ padding: '0.7rem 1.5rem', fontSize: '0.9375rem' }}>

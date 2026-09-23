@@ -152,7 +152,7 @@ export default function Dashboard() {
         toast.success('Workflow initiated. Check Approval Queue or Content Library!', { id: 'workflow', duration: 5000 });
         fetchData(); 
       } else {
-        toast.error('Workflow failed to start. Check OpenAI key in Settings.', { id: 'workflow', duration: 5000 });
+        toast.error(responseData.error || responseData.message || 'Workflow failed to start. Check the AI key in Settings.', { id: 'workflow', duration: 5000 });
       }
     } catch (err) {
       toast.error('Network error triggering workflow.', { id: 'workflow' });
@@ -509,10 +509,10 @@ export default function Dashboard() {
                     <span className="section-title">Autopilot Engine</span>
                   </div>
                   <p className="text-muted" style={{ fontSize: '0.8125rem' }}>
-                    Scans trends, writes the script, generates the voiceover, and renders the video — hands-off.
+                    Scans what’s trending in your niche and writes a ready-to-shoot script, hook, and SEO metadata.
                   </p>
-                  <button onClick={() => setActiveTab('learning-loop')} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start', marginTop: '0.15rem' }}>
-                    View Learning Loop <ChevronRight />
+                  <button onClick={() => setActiveTab('autopilot')} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start', marginTop: '0.15rem' }}>
+                    Open Autopilot Generator <ChevronRight />
                   </button>
                 </div>
               </div>

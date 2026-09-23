@@ -57,16 +57,16 @@ export async function GET() {
         name: 'Viralis Highlight AI',
         role: 'NLP Hook Detector',
         status: 'idle',
-        lastAction: 'Scanned 12 candidate moments for curiosity gaps and peak sentiment.',
-        capabilities: ['Whisper Diarization', 'Hook Scoring', 'Virality Analysis (0-100)']
+        lastAction: 'Ranks transcript moments by hook strength and scores each 0–100.',
+        capabilities: ['Whisper Transcription', 'Hook Scoring', 'Virality Score (0-100)']
       },
       {
         id: 'reframe-agent',
-        name: 'AutoReframe & Subtitle Engine',
+        name: 'Reframe & Caption Renderer',
         role: 'Visual Editor',
         status: 'idle',
-        lastAction: 'Ready to burn Hormozi Dynamic Pop subtitles in 9:16 vertical format.',
-        capabilities: ['Face Tracking 9:16', 'Word-by-word Captions', '4K Concat']
+        lastAction: 'Cuts approved clips and burns captions in 9:16, 1:1 or 16:9.',
+        capabilities: ['Center-crop Reframe', 'Burned-in Captions', '1080p Export']
       },
       {
         id: 'copy-agent',
@@ -78,11 +78,11 @@ export async function GET() {
       },
       {
         id: 'trend-agent',
-        name: 'Trend Radar & Back-Catalog Scout',
+        name: 'Trend Radar',
         role: 'Researcher',
         status: 'idle',
-        lastAction: 'Monitoring Google Trends & cross-referencing video archive.',
-        capabilities: ['Google Trends', 'Back-Catalog Sourcing', 'Niche Discovery']
+        lastAction: 'Pulls trending YouTube videos and Google Trends topics for your niche.',
+        capabilities: ['YouTube Trending', 'Google Trends', 'Niche Filtering']
       },
       {
         id: 'feedback-agent',
