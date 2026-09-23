@@ -10,7 +10,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ clipId
   try {
     const { clipId } = await params;
     const body = await req.json();
-    const { action, scheduledTime, platform = 'instagram' } = body;
+    const { action } = body;
 
     const clip = await prisma.clip.findUnique({
       where: { id: clipId },
@@ -30,30 +30,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ clipId
       });
     }
 
-    if (action === 'schedule') {
-      const scheduleTime = scheduledTime ? new Date(scheduledTime) : new Date(Date.now() + 3600 * 1000 * 4);
-
-      const schedule = await prisma.schedule.create({
-        data: {
-          clipId: clip.id,
-          platform,
-          scheduledTime: scheduleTime,
-          status: 'pending',
-        },
-      });
-
-      await prisma.clip.update({
-        where: { id: clipId },
-        data: { status: 'scheduled' },
-      });
-
-      return NextResponse.json({
-        success: true,
-        schedule,
-        message: `Clip scheduled for ${platform.toUpperCase()} at ${scheduleTime.toLocaleTimeString()}.`,
-      });
-    }
-
     if (action === 'reject') {
       await prisma.clip.update({
         where: { id: clipId },
@@ -64,8 +40,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ clipId
     }
 
     return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[API /api/repurpose/clip PATCH] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Could not update this clip.' }, { status: 500 });
   }
 }
