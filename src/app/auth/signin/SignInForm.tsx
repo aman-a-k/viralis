@@ -9,9 +9,10 @@ import { Zap, ArrowRight, Loader2 } from "lucide-react";
 interface Props {
   devLoginAvailable: boolean;
   googleLoginAvailable: boolean;
+  signupOpen: boolean;
 }
 
-export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
+export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen }: Props) {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
 
@@ -20,6 +21,17 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // NextAuth redirects back here with ?error=AccessDenied when the signIn
+  // callback rejects a Google account that isn't allowed to join.
+  const authError = searchParams.get("error");
+  React.useEffect(() => {
+    if (authError === "AccessDenied") {
+      toast.error("That Google account isn't invited to this workspace.", { id: "auth-error" });
+    } else if (authError) {
+      toast.error("Sign-in failed. Please try again.", { id: "auth-error" });
+    }
+  }, [authError]);
 
   const finish = (res: { error?: string | null; ok?: boolean } | undefined) => {
     if (res?.error) {
@@ -182,6 +194,7 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
             )}
           </div>
 
+          {(signupOpen || mode === "signup") && (
           <p className="text-muted" style={{ fontSize: "0.8125rem", marginTop: "1.25rem", textAlign: "center" }}>
             {mode === "signin" ? "Don't have an account? " : "Already have an account? "}
             <button
@@ -192,6 +205,7 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable }: Props) {
               {mode === "signin" ? "Sign up" : "Sign in"}
             </button>
           </p>
+          )}
         </div>
       </div>
     </div>

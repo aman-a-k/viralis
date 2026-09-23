@@ -4,6 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import type { NextAuthOptions } from "next-auth";
+import { canCreateAccount } from "./signupPolicy";
 
 const providers: NextAuthOptions["providers"] = [];
 
@@ -74,6 +75,13 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
+    signIn: async ({ user, account }) => {
+      if (account?.provider !== "google") return true;
+      const email = user.email?.toLowerCase().trim();
+      if (!email) return false;
+      const existing = await prisma.user.findUnique({ where: { email } });
+      return existing ? true : canCreateAccount(email);
+    },
     jwt: async ({ token, user }) => {
       if (user) token.id = user.id;
       return token;
