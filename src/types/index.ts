@@ -22,15 +22,18 @@ export interface GeneratedContent {
   tags?: string[];
 }
 
+// Secrets are never sent to the client — only whether one is saved.
 export interface SettingsData {
   youtubeId: string;
   instagramId: string;
   hasOpenAi: boolean;
-  openAiKey: string;
   youtubeClientId: string;
-  youtubeClientSecret: string;
+  hasYoutubeClientSecret: boolean;
   hasYoutubeAuth: boolean;
-  instagramAccessToken: string;
+  hasInstagramToken: boolean;
+  hasDiscordWebhook: boolean;
+  hasPexelsKey: boolean;
+  hasElevenLabsKey: boolean;
 }
 
 export interface VideoData {

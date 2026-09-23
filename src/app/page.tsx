@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { VideoData, DashboardStats, SettingsData, AgentStatus, ProjectData } from '@/types';
 import { 
@@ -47,7 +47,17 @@ export default function Dashboard() {
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSecret, setYtClientSecret] = useState('');
   const [igAccessToken, setIgAccessToken] = useState('');
-  
+  const [savedSecrets, setSavedSecrets] = useState({
+    ytClientSecret: false,
+    igToken: false,
+    discordWebhook: false,
+    pexelsKey: false,
+    elevenLabsKey: false,
+  });
+  // Settings inputs are hydrated once (and again after a save) — not on every
+  // 30s dashboard poll, which would overwrite whatever the user is typing.
+  const settingsHydrated = useRef(false);
+
   // Brand Settings
   const [brandName, setBrandName] = useState('Viralis');
   const [brandNiche, setBrandNiche] = useState('Technology & AI');
@@ -55,10 +65,9 @@ export default function Dashboard() {
   const [targetAudience, setTargetAudience] = useState('Social Media Audience');
   const [discordWebhook, setDiscordWebhook] = useState('');
   const [pexelsKey, setPexelsKey] = useState('');
-  
+
   // Pro Video Settings
   const [elevenLabsKey, setElevenLabsKey] = useState('');
-  const [pixabayKey, setPixabayKey] = useState('');
   const [videoStyle, setVideoStyle] = useState('Cinematic Stock');
   const [captionStyle, setCaptionStyle] = useState('Dynamic Pop');
 
@@ -68,38 +77,43 @@ export default function Dashboard() {
   const [defaultPlatforms, setDefaultPlatforms] = useState<string[]>(['instagram', 'youtube', 'tiktok']);
   const [defaultOrientations, setDefaultOrientations] = useState<string[]>(['9:16', '1:1', '16:9']);
 
-  const fetchData = async () => {
+  const fetchData = async (rehydrateSettings = false) => {
     try {
       const res = await fetch('/api/data');
       const json = await res.json();
       if (json.success) {
         setData(json.data);
-        if (json.data.settings) {
-          setYtId(json.data.settings.youtubeId || '');
-          setIgId(json.data.settings.instagramId || '');
-          setAiProvider(json.data.settings.aiProvider || 'gemini');
-          setAiModel(json.data.settings.aiModel || '');
-          setHasAiKey(!!json.data.settings.hasAiKey);
-          setYtClientId(json.data.settings.youtubeClientId || '');
-          setYtClientSecret(json.data.settings.youtubeClientSecret || '');
-          setIgAccessToken(json.data.settings.instagramAccessToken || '');
-          setBrandName(json.data.settings.brandName || 'Viralis');
-          setBrandNiche(json.data.settings.brandNiche || 'Technology & AI');
-          setBrandTone(json.data.settings.brandTone || 'Punchy & Viral');
-          setTargetAudience(json.data.settings.targetAudience || 'Social Media Audience');
-          setDiscordWebhook(json.data.settings.discordWebhookUrl || '');
-          setPexelsKey(json.data.settings.pexelsApiKey || '');
-          setElevenLabsKey(json.data.settings.elevenLabsApiKey || '');
-          setPixabayKey(json.data.settings.pixabayApiKey || '');
-          setVideoStyle(json.data.settings.videoStyle || 'Cinematic Stock');
-          setCaptionStyle(json.data.settings.captionStyle || 'Dynamic Pop');
-          setHasYoutubeDataKey(!!json.data.settings.hasYoutubeDataKey);
-          if (json.data.settings.brandNiche) setBrandNiche(json.data.settings.brandNiche);
-          if (Array.isArray(json.data.settings.defaultPlatforms) && json.data.settings.defaultPlatforms.length) {
-            setDefaultPlatforms(json.data.settings.defaultPlatforms);
-          }
-          if (Array.isArray(json.data.settings.defaultOrientations) && json.data.settings.defaultOrientations.length) {
-            setDefaultOrientations(json.data.settings.defaultOrientations);
+        const s = json.data.settings;
+        if (s) {
+          setHasAiKey(!!s.hasAiKey);
+          setHasYoutubeDataKey(!!s.hasYoutubeDataKey);
+          setSavedSecrets({
+            ytClientSecret: !!s.hasYoutubeClientSecret,
+            igToken: !!s.hasInstagramToken,
+            discordWebhook: !!s.hasDiscordWebhook,
+            pexelsKey: !!s.hasPexelsKey,
+            elevenLabsKey: !!s.hasElevenLabsKey,
+          });
+
+          if (!settingsHydrated.current || rehydrateSettings) {
+            settingsHydrated.current = true;
+            setYtId(s.youtubeId || '');
+            setIgId(s.instagramId || '');
+            setAiProvider(s.aiProvider || 'gemini');
+            setAiModel(s.aiModel || '');
+            setYtClientId(s.youtubeClientId || '');
+            setBrandName(s.brandName || 'Viralis');
+            setBrandNiche(s.brandNiche || 'Technology & AI');
+            setBrandTone(s.brandTone || 'Punchy & Viral');
+            setTargetAudience(s.targetAudience || 'Social Media Audience');
+            setVideoStyle(s.videoStyle || 'Cinematic Stock');
+            setCaptionStyle(s.captionStyle || 'Dynamic Pop');
+            if (Array.isArray(s.defaultPlatforms) && s.defaultPlatforms.length) {
+              setDefaultPlatforms(s.defaultPlatforms);
+            }
+            if (Array.isArray(s.defaultOrientations) && s.defaultOrientations.length) {
+              setDefaultOrientations(s.defaultOrientations);
+            }
           }
         }
       }
@@ -118,7 +132,7 @@ export default function Dashboard() {
     }
 
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(() => fetchData(), 30000);
     if (typeof window !== 'undefined' && window.location.search.includes('success=youtube_connected')) {
       toast.success("YouTube Account authorized successfully!", { id: 'oauth', duration: 5000 });
       window.history.replaceState(null, '', '/');
@@ -157,18 +171,17 @@ export default function Dashboard() {
           instagramId: igId,
           aiProvider,
           aiApiKey: aiApiKey || undefined,
-          aiModel: aiModel || undefined,
+          aiModel,
           youtubeClientId: ytClientId,
-          youtubeClientSecret: ytClientSecret,
-          instagramAccessToken: igAccessToken,
+          youtubeClientSecret: ytClientSecret || undefined,
+          instagramAccessToken: igAccessToken || undefined,
           brandName,
           brandNiche,
           brandTone,
           targetAudience,
-          discordWebhookUrl: discordWebhook,
-          pexelsApiKey: pexelsKey,
-          elevenLabsApiKey: elevenLabsKey,
-          pixabayApiKey: pixabayKey,
+          discordWebhookUrl: discordWebhook || undefined,
+          pexelsApiKey: pexelsKey || undefined,
+          elevenLabsApiKey: elevenLabsKey || undefined,
           videoStyle,
           captionStyle,
           youtubeDataApiKey: youtubeDataApiKey || undefined,
@@ -179,10 +192,17 @@ export default function Dashboard() {
       const responseData = await res.json();
       if (responseData.success) {
         if (toastId) toast.success("Configuration saved successfully!", { id: toastId });
-        fetchData();
+        setAiApiKey('');
+        setYtClientSecret('');
+        setIgAccessToken('');
+        setDiscordWebhook('');
+        setPexelsKey('');
+        setElevenLabsKey('');
+        setYoutubeDataApiKey('');
+        fetchData(true);
         return true;
       }
-      if (toastId) toast.error("Failed to save settings.", { id: toastId });
+      if (toastId) toast.error(responseData.error || "Failed to save settings.", { id: toastId });
       return false;
     } catch (err) {
       if (toastId) toast.error("Error saving settings.", { id: toastId });
@@ -202,7 +222,7 @@ export default function Dashboard() {
   };
 
   const handleYoutubeLogin = async () => {
-    if (!ytClientId || !ytClientSecret) {
+    if (!ytClientId || (!ytClientSecret && !savedSecrets.ytClientSecret)) {
       toast.error("Add your GCP Client ID and Client Secret first!");
       return;
     }
@@ -605,7 +625,7 @@ export default function Dashboard() {
           {activeTab === 'repurpose' && (
             <RepurposeStudioView
               projects={projects}
-              onRefresh={fetchData}
+              onRefresh={() => fetchData()}
               defaultPlatforms={defaultPlatforms}
               defaultOrientations={defaultOrientations}
               defaultCaptionStyle={captionStyle}
@@ -652,7 +672,7 @@ export default function Dashboard() {
 
           {/* APPROVAL QUEUE TAB */}
           {activeTab === 'queue' && (
-            <ApprovalQueueView items={data?.approvalQueue || []} onRefresh={fetchData} />
+            <ApprovalQueueView items={data?.approvalQueue || []} onRefresh={() => fetchData()} />
           )}
 
           {/* CONTENT LIBRARY TAB */}
@@ -814,7 +834,7 @@ export default function Dashboard() {
                       </div>
                       <div className="form-group">
                         <label className="form-label">GCP Client Secret</label>
-                        <input type="password" value={ytClientSecret} onChange={(e) => setYtClientSecret(e.target.value)} placeholder="GOCSPX-..." className="input-field" />
+                        <input type="password" value={ytClientSecret} onChange={(e) => setYtClientSecret(e.target.value)} placeholder={savedSecrets.ytClientSecret ? '•••••••• (saved — leave blank to keep)' : 'GOCSPX-...'} className="input-field" />
                       </div>
                       <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={handleYoutubeLogin}>
                         Authorize YouTube Account
@@ -825,8 +845,8 @@ export default function Dashboard() {
                   <div className="panel-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                       <h3 style={{ fontSize: '0.875rem', fontWeight: 700 }}>Instagram Graph API</h3>
-                      <span className={`badge ${settings?.instagramAccessToken ? 'badge-success' : 'badge-neutral'}`}>
-                        {settings?.instagramAccessToken ? 'Connected' : 'Not Connected'}
+                      <span className={`badge ${savedSecrets.igToken ? 'badge-success' : 'badge-neutral'}`}>
+                        {savedSecrets.igToken ? 'Connected' : 'Not Connected'}
                       </span>
                     </div>
 
@@ -837,7 +857,7 @@ export default function Dashboard() {
                       </div>
                       <div className="form-group">
                         <label className="form-label">Page Access Token</label>
-                        <input type="password" value={igAccessToken} onChange={(e) => setIgAccessToken(e.target.value)} placeholder="EAA..." className="input-field" />
+                        <input type="password" value={igAccessToken} onChange={(e) => setIgAccessToken(e.target.value)} placeholder={savedSecrets.igToken ? '•••••••• (saved — leave blank to keep)' : 'EAA...'} className="input-field" />
                       </div>
                     </div>
                   </div>
@@ -872,11 +892,11 @@ export default function Dashboard() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       <div className="form-group">
                         <label className="form-label">ElevenLabs API Key (Hyper-Realistic TTS)</label>
-                        <input type="password" value={elevenLabsKey} onChange={(e) => setElevenLabsKey(e.target.value)} placeholder="API Key..." className="input-field" />
+                        <input type="password" value={elevenLabsKey} onChange={(e) => setElevenLabsKey(e.target.value)} placeholder={savedSecrets.elevenLabsKey ? '•••••••• (saved — leave blank to keep)' : 'API Key...'} className="input-field" />
                       </div>
                       <div className="form-group">
                         <label className="form-label">Pexels API Key (Stock B-Roll)</label>
-                        <input type="password" value={pexelsKey} onChange={(e) => setPexelsKey(e.target.value)} placeholder="API Key..." className="input-field" />
+                        <input type="password" value={pexelsKey} onChange={(e) => setPexelsKey(e.target.value)} placeholder={savedSecrets.pexelsKey ? '•••••••• (saved — leave blank to keep)' : 'API Key...'} className="input-field" />
                       </div>
                       <div className="form-group">
                         <label className="form-label">Video Style</label>
@@ -901,7 +921,7 @@ export default function Dashboard() {
                   <h3 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.65rem' }}>Notifications & Alerts</h3>
                   <div className="form-group">
                     <label className="form-label">Discord Webhook URL (Alerts on Highlight Extraction & Video Generation)</label>
-                    <input type="text" value={discordWebhook} onChange={(e) => setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="input-field" />
+                    <input type="password" value={discordWebhook} onChange={(e) => setDiscordWebhook(e.target.value)} placeholder={savedSecrets.discordWebhook ? '•••••••• (saved — leave blank to keep)' : 'https://discord.com/api/webhooks/...'} className="input-field" />
                   </div>
                 </div>
 

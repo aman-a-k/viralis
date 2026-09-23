@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { Settings } from '@prisma/client';
 import { requireSession } from '@/lib/apiAuth';
 
 export async function GET() {
@@ -21,15 +22,8 @@ export async function GET() {
       });
     }
 
-    const settings = await prisma.settings.findFirst({ where: { id: 'default' } }) || {
-      youtubeId: '',
-      instagramId: '',
-      openAiKey: '',
-      youtubeClientId: '',
-      youtubeClientSecret: '',
-      youtubeRefreshToken: '',
-      instagramAccessToken: ''
-    };
+    const settings: Partial<Settings> =
+      (await prisma.settings.findFirst({ where: { id: 'default' } })) ?? {};
 
     const trends = await prisma.trend.findMany({
       orderBy: { createdAt: 'desc' },
@@ -113,7 +107,12 @@ export async function GET() {
           subs: analytics.subscribersGained
         },
         settings: {
+          youtubeId: settings.youtubeId || '',
           instagramId: settings.instagramId || '',
+          brandName: settings.brandName || '',
+          brandTone: settings.brandTone || '',
+          targetAudience: settings.targetAudience || '',
+          videoStyle: settings.videoStyle || '',
           aiProvider: (settings as { aiProvider?: string }).aiProvider || 'gemini',
           hasAiKey: !!(
             (settings as { aiApiKey?: string }).aiApiKey ||
@@ -124,11 +123,13 @@ export async function GET() {
           ),
           aiModel: (settings as { aiModel?: string }).aiModel || '',
           hasOpenAi: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
-          openAiKey: '',
           youtubeClientId: settings.youtubeClientId || '',
-          youtubeClientSecret: settings.youtubeClientSecret || '',
+          hasYoutubeClientSecret: !!settings.youtubeClientSecret,
           hasYoutubeAuth: !!settings.youtubeRefreshToken,
-          instagramAccessToken: settings.instagramAccessToken || '',
+          hasInstagramToken: !!settings.instagramAccessToken,
+          hasDiscordWebhook: !!settings.discordWebhookUrl,
+          hasPexelsKey: !!settings.pexelsApiKey,
+          hasElevenLabsKey: !!settings.elevenLabsApiKey,
           hasYoutubeDataKey: !!(
             (settings as { youtubeDataApiKey?: string }).youtubeDataApiKey || process.env.YOUTUBE_API_KEY
           ),
