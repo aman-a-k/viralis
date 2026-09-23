@@ -35,9 +35,23 @@ export async function GET() {
       orderBy: { createdAt: 'desc' }
     });
 
+    // Full transcripts (often 100KB+ each) are never shown on the dashboard
+    // and this route is polled every 30s — leave them out.
     const projects = await prisma.project.findMany({
       orderBy: { createdAt: 'desc' },
-      include: {
+      select: {
+        id: true,
+        title: true,
+        sourceVideoUrl: true,
+        sourceVideoId: true,
+        sourceType: true,
+        channel: true,
+        thumbnail: true,
+        duration: true,
+        status: true,
+        errorMessage: true,
+        createdAt: true,
+        updatedAt: true,
         clips: {
           orderBy: { viralityScore: 'desc' },
           include: { metrics: true },
