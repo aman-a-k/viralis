@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { humanizeHook } from '@/lib/hookLabels';
 import { ProjectData, ClipData } from '@/types';
 import {
   Scissors, Copy, Check, Send, Sparkles, RefreshCw, Video, ExternalLink,
@@ -36,19 +37,6 @@ const REGIONS: [string, string][] = [
   ['US', 'United States'], ['GB', 'United Kingdom'], ['IN', 'India'], ['CA', 'Canada'], ['AU', 'Australia'],
 ];
 
-// Plain-language stand-ins for the analyzer's internal hook categories —
-// creators shouldn't need to know what "contrarian" means.
-const HOOK_LABELS: Record<string, string> = {
-  contrarian: 'Surprising take',
-  framework: 'Step-by-step',
-  story: 'Story',
-  data: 'Quick fact',
-  question: 'Makes you think',
-  howto: 'How-to',
-  controversy: 'Hot take',
-  insight: 'Insight',
-};
-const humanizeHook = (h?: string | null) => (h && HOOK_LABELS[h]) || 'Highlight';
 
 type Vibe = 'hook' | 'calm' | 'trendy' | 'story';
 const VIBE_LABEL: Record<Vibe, string> = { hook: 'Hook-heavy', calm: 'Calm & informative', trendy: 'Trendy & fast', story: 'Story-driven' };

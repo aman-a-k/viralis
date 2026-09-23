@@ -52,6 +52,8 @@ export interface DashboardStats {
   engagement: number;
   subs: number;
   revenue: number;
+  /** null until at least one clip has real performance metrics. */
+  avgWatchThrough?: number | null;
 }
 
 export interface AgentStatus {
@@ -148,6 +150,8 @@ export interface FeedbackLoopData {
    * results. */
   isSampleData: boolean;
   overallWatchThrough: number;
+  clipsMeasured: number;
+  totalViews: number;
   highPerformingHooks: string[];
   underperformingClips: {
     clipTitle: string;
@@ -156,12 +160,13 @@ export interface FeedbackLoopData {
     watchThrough: number;
     rootCause: string;
   }[];
+  /** Illustrative only — present in sample mode; nothing re-tunes the analyzer yet. */
   modelWeightAdjustments: {
-    hookSpeedWeight: number; // e.g. +25%
-    emotionalIntensityWeight: number; // e.g. +15%
-    controversyWeight: number; // e.g. -10%
-    nicheTopicRelevance: number; // e.g. +30%
-  };
+    hookSpeedWeight: number;
+    emotionalIntensityWeight: number;
+    controversyWeight: number;
+    nicheTopicRelevance: number;
+  } | null;
   backCatalogSuggestions: {
     projectId: string;
     projectTitle: string;

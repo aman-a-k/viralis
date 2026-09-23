@@ -435,7 +435,7 @@ export default function Dashboard() {
                 {activeTab === 'repurpose' && "Turn long-form video into high-retention 9:16 shorts with automatic reframing and dynamic subtitles."}
                 {activeTab === 'autopilot' && "Scan trends and autonomously write a script, then send it to your Approval Queue for review."}
                 {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
-                {activeTab === 'learning-loop' && "Closed-loop audience retention metrics and dynamic highlight re-weighting."}
+                {activeTab === 'learning-loop' && "Real performance of your published clips — watch-through, winning hook styles, and drop-offs."}
                 {activeTab === 'trends' && "Real-time Google Trends signals and back-catalog matching."}
                 {activeTab === 'agents' && "Multi-agent execution across highlight detection, editing, and distribution."}
                 {activeTab === 'settings' && "API keys, OAuth connections, and brand voice."}
@@ -472,7 +472,7 @@ export default function Dashboard() {
                 {[
                   { label: 'Repurposed highlights', value: totalClipsCount, icon: Scissors, foot: 'Ranked by AI virality' },
                   { label: 'Autopilot videos', value: videos.length, icon: Video, foot: 'Fully automated pipeline' },
-                  { label: 'Avg. watch-through', value: '74%', icon: TrendingUp, foot: 'Across published clips' },
+                  { label: 'Avg. watch-through', value: stats.avgWatchThrough != null ? `${stats.avgWatchThrough}%` : '—', icon: TrendingUp, foot: stats.avgWatchThrough != null ? 'Across published clips' : 'No published metrics yet' },
                   { label: 'In review', value: pendingQueueCount, icon: ClipboardCheck, foot: 'Awaiting approval' },
                 ].map((m) => {
                   const Icon = m.icon;

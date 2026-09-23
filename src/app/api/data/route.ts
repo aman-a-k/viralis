@@ -48,6 +48,9 @@ export async function GET() {
 
     const totalClipsCount = await prisma.clip.count();
 
+    const watchThrough = await prisma.metric.aggregate({ _avg: { watchThroughPct: true }, _count: true });
+    const avgWatchThrough = watchThrough._count > 0 ? Math.round(watchThrough._avg.watchThroughPct ?? 0) : null;
+
     const agents = [
       {
         id: 'clipper-agent',
@@ -83,11 +86,11 @@ export async function GET() {
       },
       {
         id: 'feedback-agent',
-        name: 'Learning Loop & Healer',
-        role: 'Self-Optimizer',
+        name: 'Learning Loop',
+        role: 'Performance Analyst',
         status: 'idle',
-        lastAction: 'Ingesting retention curves and re-weighting highlight detection priorities.',
-        capabilities: ['Root-Cause Tagging', 'Dynamic Weight Tuning', 'Audience Analytics']
+        lastAction: 'Summarizes watch-through and drop-offs from published clip metrics.',
+        capabilities: ['Watch-through Analysis', 'Hook Style Comparison', 'Drop-off Flags']
       }
     ];
 
@@ -104,7 +107,8 @@ export async function GET() {
           revenue: analytics.totalRevenue,
           views: analytics.totalViews,
           engagement: analytics.engagementRate,
-          subs: analytics.subscribersGained
+          subs: analytics.subscribersGained,
+          avgWatchThrough,
         },
         settings: {
           youtubeId: settings.youtubeId || '',

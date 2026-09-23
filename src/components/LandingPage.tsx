@@ -26,7 +26,7 @@ const FEATURES = [
   {
     icon: Brain,
     title: 'Learning Loop',
-    description: 'Closed-loop audience retention metrics that re-weight highlight selection based on what actually performs.',
+    description: 'See how each published clip actually performs — watch-through, which hook styles hold viewers, and where they drop off.',
   },
 ];
 
