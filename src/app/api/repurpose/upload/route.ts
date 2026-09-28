@@ -2,42 +2,45 @@ import { NextResponse } from 'next/server';
 import { describeLlmError } from '@/lib/llm';
 import { RepurposingService } from '@/services/repurposingService';
 import { requireSession } from '@/lib/apiAuth';
+import { isBlobUrl } from '@/lib/blob';
 
-// Analysis chains multiple LLM calls; allow up to the Hobby-plan max.
+// Analysis chains multiple LLM calls, and starting a transcription job can
+// wait out a cold worker; allow up to the Hobby-plan max.
 export const maxDuration = 60;
 
 /**
- * "Upload" now means: paste a transcript for analysis. Analyzing a raw video
- * file requires the media worker (transcription + processing), which is not
- * enabled on this deployment. YouTube links are handled by /api/repurpose.
+ * Two ways in:
+ * - { mediaUrl, title }: a video the browser already uploaded to Vercel Blob
+ *   (via /api/repurpose/upload-token). The worker transcribes it; the client
+ *   then polls /api/repurpose/poll like the YouTube flow.
+ * - { transcript, title }: a pasted transcript, analyzed immediately.
  */
 export async function POST(req: Request) {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const contentType = req.headers.get('content-type') || '';
-    let title = '';
-    let transcript = '';
+    const body = await req.json();
+    const { title = '', mediaUrl, clipCount, platforms, orientations, captionStyle } = body;
+    const transcript: string = body.transcript || body.transcriptText || '';
+    const config = {
+      platforms: Array.isArray(platforms) && platforms.length ? platforms : undefined,
+      orientations: Array.isArray(orientations) && orientations.length ? orientations : undefined,
+      captionStyle,
+    };
+    const desiredClipCount = Math.min(10, Math.max(3, Number(clipCount) || 5));
 
-    if (contentType.includes('application/json')) {
-      const body = await req.json();
-      title = body.title || '';
-      transcript = body.transcript || body.transcriptText || '';
-    } else {
-      const form = await req.formData();
-      title = (form.get('title') as string) || '';
-      transcript = (form.get('transcript') as string) || '';
-      if (form.get('video')) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              'Direct video-file analysis needs the media worker (transcription), which is not enabled here. Paste the transcript, or use a YouTube link.',
-          },
-          { status: 501 }
-        );
+    if (mediaUrl) {
+      if (typeof mediaUrl !== 'string' || !isBlobUrl(mediaUrl)) {
+        return NextResponse.json({ success: false, error: 'Invalid upload URL.' }, { status: 400 });
       }
+      const result = await RepurposingService.ingestUpload(mediaUrl, String(title), desiredClipCount, config);
+      return NextResponse.json({
+        success: true,
+        transcribing: true,
+        project: result.project,
+        message: `Uploaded "${result.project.title}" — transcribing the audio now (can take a few minutes for longer videos)…`,
+      });
     }
 
     if (!transcript || transcript.trim().length < 200) {
@@ -50,6 +53,8 @@ export async function POST(req: Request) {
     const result = await RepurposingService.ingestVideo({
       title: title || 'Pasted transcript',
       transcriptText: transcript,
+      desiredClipCount,
+      ...config,
     });
 
     return NextResponse.json({

@@ -87,6 +87,8 @@ export interface ClipData {
   transcriptSegment: string;
   captionVersions: PlatformCaptions | string;
   videoUrl?: string | null;
+  renderStatus?: 'rendering' | 'rendered' | 'failed' | null;
+  renderError?: string | null;
   status: 'candidate' | 'approved' | 'scheduled' | 'published' | 'rejected';
   createdAt: string;
   metrics?: MetricData[];

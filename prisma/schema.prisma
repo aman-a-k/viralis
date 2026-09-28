@@ -151,6 +151,9 @@ model Clip {
   transcriptSegment String
   captionVersions   String // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
   videoUrl          String?
+  renderStatus      String? // null | "rendering" | "rendered" | "failed"
+  renderJobId       String? // worker job id while rendering
+  renderError       String?
   status            String     @default("candidate") // "candidate", "approved", "scheduled", "published", "rejected"
   createdAt         DateTime   @default(now())
   schedules         Schedule[]

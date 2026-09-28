@@ -21,15 +21,17 @@ export function warmUpWorker(): void {
   fetch(`${url.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(55_000) }).catch(() => {});
 }
 
-export interface RenderJob {
+/** Where the worker should read the source video from. */
+export type MediaSource = { youtubeUrl: string } | { mediaUrl: string };
+
+export type RenderJob = MediaSource & {
   clipId: string;
-  youtubeUrl: string;
   startTime: number;
   endTime: number;
   aspectRatio: '9:16' | '1:1' | '16:9';
   captionText: string;
   captionStyle: string;
-}
+};
 
 export class RenderWorkerNotConfiguredError extends Error {
   constructor() {
@@ -40,26 +42,58 @@ export class RenderWorkerNotConfiguredError extends Error {
   }
 }
 
-export async function renderClipOnWorker(job: RenderJob): Promise<string> {
+/** The worker restarted and lost the job (jobs live in its memory). */
+export class WorkerJobLostError extends Error {
+  constructor() {
+    super('The worker restarted while this job was running. Try again.');
+    this.name = 'WorkerJobLostError';
+  }
+}
+
+function workerConfig() {
   const url = process.env.RENDER_WORKER_URL;
   const secret = process.env.RENDER_WORKER_SECRET;
   if (!url || !secret) throw new RenderWorkerNotConfiguredError();
+  return { base: url.replace(/\/$/, ''), secret };
+}
 
-  const res = await fetch(`${url.replace(/\/$/, '')}/render`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${secret}`,
-    },
-    body: JSON.stringify(job),
-    signal: AbortSignal.timeout(55_000),
+async function workerRequest<T>(path: string, init: { method?: string; body?: unknown; timeoutMs: number }): Promise<T> {
+  const { base, secret } = workerConfig();
+  const res = await fetch(`${base}${path}`, {
+    method: init.method || 'GET',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: AbortSignal.timeout(init.timeoutMs),
   });
-
   const data = await res.json().catch(() => ({}));
+  if (res.status === 404 && path.includes('/status/')) throw new WorkerJobLostError();
   if (!res.ok || !data.success) {
     throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
   }
-  return data.videoUrl as string;
+  return data as T;
+}
+
+// Render's free tier spins down after ~15 minutes idle and can take 30-60s
+// to wake, so starting a job needs real headroom, not a quick fail.
+const START_TIMEOUT_MS = 55_000;
+
+/** Starts a background render; poll with getRenderJobStatus. */
+export async function startRenderJob(job: RenderJob): Promise<string> {
+  const data = await workerRequest<{ jobId: string }>('/render/start', {
+    method: 'POST',
+    body: job,
+    timeoutMs: START_TIMEOUT_MS,
+  });
+  return data.jobId;
+}
+
+export type RenderJobStatus =
+  | { status: 'processing' }
+  | { status: 'done'; videoUrl: string }
+  | { status: 'error'; error: string };
+
+export async function getRenderJobStatus(jobId: string): Promise<RenderJobStatus> {
+  return workerRequest<RenderJobStatus>(`/render/status/${encodeURIComponent(jobId)}`, { timeoutMs: 20_000 });
 }
 
 export interface WorkerTranscriptSegment {
@@ -73,51 +107,22 @@ export type TranscriptJobStatus =
   | { status: 'done'; transcript: WorkerTranscriptSegment[] }
   | { status: 'error'; error: string };
 
-function workerHeaders(secret: string) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` };
-}
-
 /**
- * Starts a background transcription job on the worker (it downloads the
- * audio and transcribes it with whisper.cpp — YouTube's caption endpoint now
- * blocks this entirely, even with cookies). Returns the job id immediately;
- * poll with getTranscriptJobStatus. Returns null if the worker isn't
- * configured, so callers can fall back to the direct/synchronous methods.
+ * Starts a background transcription job on the worker (audio from YouTube or
+ * from an uploaded file, transcribed with whisper.cpp). Returns the job id
+ * immediately; poll with getTranscriptJobStatus. Returns null if the worker
+ * isn't configured, so callers can fall back to the direct methods.
  */
-export async function startTranscriptJob(youtubeUrl: string): Promise<string | null> {
-  const url = process.env.RENDER_WORKER_URL;
-  const secret = process.env.RENDER_WORKER_SECRET;
-  if (!url || !secret) return null;
-
-  // Render's free tier spins down after ~15 minutes idle and can take 30-60s
-  // to wake back up, so this first call needs real headroom, not a quick fail.
-  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/start`, {
+export async function startTranscriptJob(source: MediaSource): Promise<string | null> {
+  if (!renderWorkerConfigured()) return null;
+  const data = await workerRequest<{ jobId: string }>('/transcript/start', {
     method: 'POST',
-    headers: workerHeaders(secret),
-    body: JSON.stringify({ youtubeUrl }),
-    signal: AbortSignal.timeout(55_000),
+    body: source,
+    timeoutMs: START_TIMEOUT_MS,
   });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
-  }
-  return data.jobId as string;
+  return data.jobId;
 }
 
 export async function getTranscriptJobStatus(jobId: string): Promise<TranscriptJobStatus> {
-  const url = process.env.RENDER_WORKER_URL;
-  const secret = process.env.RENDER_WORKER_SECRET;
-  if (!url || !secret) throw new RenderWorkerNotConfiguredError();
-
-  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/status/${jobId}`, {
-    headers: workerHeaders(secret),
-    signal: AbortSignal.timeout(20_000),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
-  }
-  return data as TranscriptJobStatus;
+  return workerRequest<TranscriptJobStatus>(`/transcript/status/${encodeURIComponent(jobId)}`, { timeoutMs: 20_000 });
 }

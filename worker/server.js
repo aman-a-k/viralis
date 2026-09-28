@@ -2,18 +2,18 @@
 //
 // Standalone service (deployed separately — e.g. Render — because Vercel's
 // serverless functions can't run ffmpeg/yt-dlp or hold a job open long
-// enough). Receives one clip job at a time from the Next.js app, downloads
-// just that time range of the source video, cuts + reframes + burns
-// captions with ffmpeg, uploads the result to Vercel Blob, and returns the
-// public URL synchronously.
+// enough). Two kinds of background job, both fire-and-poll because they
+// routinely outlast any single HTTP request on a free-tier CPU:
 //
-// Also runs transcription: YouTube now blocks anonymous automated access to
-// both video and captions, and even authenticated (cookie) requests can't
-// get captions past a proof-of-origin token requirement. So instead of
-// asking YouTube for captions, this worker downloads the audio (which does
-// work with cookies) and transcribes it itself with whisper.cpp. That's
-// slow for long videos — far past what a single HTTP request can wait on —
-// so transcription runs as a background job the main app polls for.
+// - Transcription: gets the audio (from YouTube via yt-dlp, or straight from
+//   an uploaded file) and transcribes it with whisper.cpp.
+// - Rendering: cuts a clip's time range, reframes it, burns captions with
+//   ffmpeg, and uploads the result to Vercel Blob.
+//
+// Sources are either a YouTube URL or a `mediaUrl` for a file the user
+// uploaded to this app's Vercel Blob store. Uploaded files don't touch
+// YouTube at all, so they keep working even when YouTube is blocking this
+// server's IP.
 //
 // Auth: every request must carry `Authorization: Bearer <WORKER_SECRET>`
 // matching the WORKER_SECRET env var here (same value goes into the Next.js
@@ -71,64 +71,111 @@ function checkAuth(req, res) {
   return true;
 }
 
-app.post('/render', async (req, res) => {
-  if (!checkAuth(req, res)) return;
-  if (!BLOB_TOKEN) {
-    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
+// --- Shared job plumbing ---------------------------------------------------
+
+// Uploaded sources live in this app's Vercel Blob store. Only those are ever
+// fetched — the worker must not be usable to pull arbitrary URLs.
+function isAllowedMediaUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'https:' && u.hostname.endsWith('.public.blob.vercel-storage.com');
+  } catch {
+    return false;
   }
+}
 
-  const {
-    youtubeUrl,
-    startTime,
-    endTime,
-    aspectRatio = '9:16',
-    captionText = '',
-    captionStyle = 'Dynamic Pop',
-    clipId,
-  } = req.body || {};
+// whisper.cpp and a 1080p encode each want most of the free tier's 512MB, so
+// heavy jobs run one at a time instead of OOM-killing each other.
+let heavyQueue = Promise.resolve();
+function runExclusive(fn) {
+  const run = heavyQueue.then(fn, fn);
+  heavyQueue = run.catch(() => {});
+  return run;
+}
 
-  if (!youtubeUrl || typeof startTime !== 'number' || typeof endTime !== 'number' || endTime <= startTime) {
-    return res.status(400).json({ success: false, error: 'youtubeUrl, startTime and endTime are required.' });
+// Jobs live in memory only — lost on a restart/redeploy, which the app
+// reports as "interrupted" so the user can retry.
+const JOB_RETENTION_MS = 60 * 60 * 1000;
+function createJobStore() {
+  const jobs = new Map();
+  return {
+    create() {
+      const now = Date.now();
+      for (const [id, job] of jobs) {
+        if (job.status !== 'processing' && now - job.updatedAt > JOB_RETENTION_MS) jobs.delete(id);
+      }
+      const id = randomUUID();
+      jobs.set(id, { status: 'processing', updatedAt: now });
+      return id;
+    },
+    set(id, data) {
+      jobs.set(id, { ...data, updatedAt: Date.now() });
+    },
+    get(id) {
+      return jobs.get(id);
+    },
+  };
+}
+
+function sourceFromBody(body) {
+  const { youtubeUrl, mediaUrl } = body || {};
+  if (mediaUrl) {
+    if (!isAllowedMediaUrl(mediaUrl)) return { error: 'mediaUrl must be a file in this app\'s Vercel Blob storage.' };
+    return { mediaUrl };
   }
+  if (youtubeUrl) return { youtubeUrl };
+  return { error: 'youtubeUrl or mediaUrl is required.' };
+}
 
+// --- Rendering (background job) --------------------------------------------
+
+const renderJobs = createJobStore();
+
+async function renderClip({ youtubeUrl, mediaUrl, startTime, endTime, aspectRatio, captionText, captionStyle, clipId }) {
   const duration = Math.min(90, endTime - startTime);
   const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-'));
   const rawPath = path.join(workDir, 'raw.mp4');
   const assPath = path.join(workDir, 'subs.ass');
   const outPath = path.join(workDir, 'out.mp4');
+  const tag = `[render ${clipId || '?'}]`;
 
   try {
-    console.log(`[render] clip ${clipId || '?'}: downloading ${startTime}-${endTime}s of ${youtubeUrl}`);
-
-    // Pad the section slightly so ffmpeg has keyframes to cut cleanly on.
-    const padStart = Math.max(0, Math.floor(startTime) - 2);
-    const padEnd = Math.ceil(endTime) + 2;
-    await runYtDlpWithRetry(
-      [
-        '--no-playlist',
-        '--download-sections', `*${padStart}-${padEnd}`,
-        '--force-keyframes-at-cuts',
-        '-f', 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b',
-        '--merge-output-format', 'mp4',
-        '-o', rawPath,
-        youtubeUrl,
-      ],
-      `render clip ${clipId || '?'}`
-    );
+    let inputArgs;
+    if (mediaUrl) {
+      // ffmpeg seeks inside the remote file with HTTP range requests, so
+      // only the needed part is actually read.
+      console.log(`${tag} cutting ${startTime}-${endTime}s from uploaded file`);
+      inputArgs = ['-ss', String(startTime), '-i', mediaUrl];
+    } else {
+      console.log(`${tag} downloading ${startTime}-${endTime}s of ${youtubeUrl}`);
+      // Pad the section slightly so ffmpeg has keyframes to cut cleanly on.
+      const padStart = Math.max(0, Math.floor(startTime) - 2);
+      const padEnd = Math.ceil(endTime) + 2;
+      await runYtDlpWithRetry(
+        [
+          '--no-playlist',
+          '--download-sections', `*${padStart}-${padEnd}`,
+          '--force-keyframes-at-cuts',
+          '-f', 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b',
+          '--merge-output-format', 'mp4',
+          '-o', rawPath,
+          youtubeUrl,
+        ],
+        `render clip ${clipId || '?'}`
+      );
+      inputArgs = ['-ss', String(Math.max(0, startTime - padStart)), '-i', rawPath];
+    }
 
     await writeFile(assPath, buildAss(captionText, duration, aspectRatio, captionStyle), 'utf8');
-
     const scaleCrop = SCALE_CROP[aspectRatio] || SCALE_CROP['9:16'];
-    const relativeStart = Math.max(0, startTime - padStart);
     const assFilterPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 
-    console.log(`[render] clip ${clipId || '?'}: cutting + burning captions`);
+    console.log(`${tag} encoding + burning captions`);
     await execFileAsync(
       'ffmpeg',
       [
         '-y',
-        '-ss', String(relativeStart),
-        '-i', rawPath,
+        ...inputArgs,
         '-t', String(duration),
         '-vf', `${scaleCrop},ass=${assFilterPath}`,
         '-c:v', 'libx264',
@@ -139,65 +186,76 @@ app.post('/render', async (req, res) => {
         '-movflags', '+faststart',
         outPath,
       ],
-      { timeout: 5 * 60 * 1000 }
+      { timeout: 15 * 60 * 1000 }
     );
 
     const fileBuffer = await readFile(outPath);
     const filename = `clips/${clipId || Date.now()}_${aspectRatio.replace(':', 'x')}.mp4`;
-    console.log(`[render] clip ${clipId || '?'}: uploading (${(fileBuffer.length / 1e6).toFixed(1)}MB)`);
+    console.log(`${tag} uploading (${(fileBuffer.length / 1e6).toFixed(1)}MB)`);
     const blob = await put(filename, fileBuffer, {
       access: 'public',
       contentType: 'video/mp4',
       token: BLOB_TOKEN,
+      addRandomSuffix: true,
     });
-
-    res.json({ success: true, videoUrl: blob.url });
-  } catch (err) {
-    console.error('[render] failed:', err?.stderr?.toString?.() || err?.message || err);
-    res.status(500).json({
-      success: false,
-      error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
-    });
+    return blob.url;
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+app.post('/render/start', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  if (!BLOB_TOKEN) {
+    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
+  }
+  const source = sourceFromBody(req.body);
+  if (source.error) return res.status(400).json({ success: false, error: source.error });
+
+  const { startTime, endTime, aspectRatio = '9:16', captionText = '', captionStyle = 'Dynamic Pop', clipId } = req.body;
+  if (typeof startTime !== 'number' || typeof endTime !== 'number' || endTime <= startTime) {
+    return res.status(400).json({ success: false, error: 'startTime and endTime are required.' });
+  }
+
+  const jobId = renderJobs.create();
+  runExclusive(() =>
+    renderClip({ ...source, startTime, endTime, aspectRatio, captionText, captionStyle, clipId })
+  )
+    .then((videoUrl) => renderJobs.set(jobId, { status: 'done', videoUrl }))
+    .catch((err) => {
+      console.error(`[render ${clipId || '?'}] failed:`, err?.stderr?.toString?.() || err?.message || err);
+      renderJobs.set(jobId, {
+        status: 'error',
+        error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
+      });
+    });
+  res.json({ success: true, jobId });
 });
 
-// --- Transcription (background job) ---------------------------------------
-//
-// Transcribing a full video with whisper.cpp on a free-tier CPU can take far
-// longer than any single HTTP request should wait, so this is a fire-and-poll
-// job: POST /transcript/start kicks it off and returns immediately, GET
-// /transcript/status/:jobId reports progress. Jobs live in memory only —
-// fine for a single always-on instance, but lost on a restart/redeploy.
-const transcriptJobs = new Map();
-const JOB_TIMEOUT_MS = 20 * 60 * 1000; // hard ceiling per transcription
-const JOB_RETENTION_MS = 60 * 60 * 1000; // how long a finished job's result is kept
+app.get('/render/status/:jobId', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  const job = renderJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ success: false, error: 'Unknown or expired job id.' });
+  if (job.status === 'processing') return res.json({ success: true, status: 'processing' });
+  if (job.status === 'error') return res.json({ success: true, status: 'error', error: job.error });
+  res.json({ success: true, status: 'done', videoUrl: job.videoUrl });
+});
 
-function pruneOldJobs() {
-  const now = Date.now();
-  for (const [id, job] of transcriptJobs) {
-    if (job.status !== 'processing' && now - job.updatedAt > JOB_RETENTION_MS) {
-      transcriptJobs.delete(id);
-    }
-  }
-}
+// --- Transcription (background job) ----------------------------------------
+
+const transcriptJobs = createJobStore();
+const JOB_TIMEOUT_MS = 20 * 60 * 1000; // hard ceiling per transcription
 
 app.post('/transcript/start', (req, res) => {
   if (!checkAuth(req, res)) return;
   if (!WHISPER_MODEL) {
     return res.status(500).json({ success: false, error: 'WHISPER_MODEL is not set on the worker.' });
   }
+  const source = sourceFromBody(req.body);
+  if (source.error) return res.status(400).json({ success: false, error: source.error });
 
-  const { youtubeUrl } = req.body || {};
-  if (!youtubeUrl) {
-    return res.status(400).json({ success: false, error: 'youtubeUrl is required.' });
-  }
-
-  pruneOldJobs();
-  const jobId = randomUUID();
-  transcriptJobs.set(jobId, { status: 'processing', updatedAt: Date.now() });
-  runTranscriptionJob(jobId, youtubeUrl);
+  const jobId = transcriptJobs.create();
+  runExclusive(() => runTranscriptionJob(jobId, source));
   res.json({ success: true, jobId });
 });
 
@@ -212,26 +270,29 @@ app.get('/transcript/status/:jobId', (req, res) => {
   res.json({ success: true, status: 'done', transcript: job.transcript });
 });
 
-async function runTranscriptionJob(jobId, youtubeUrl) {
+async function runTranscriptionJob(jobId, { youtubeUrl, mediaUrl }) {
   const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-whisper-'));
   const outBase = path.join(workDir, 'transcript');
+  const wavPath = path.join(workDir, 'audio.wav');
   try {
-    console.log(`[transcript ${jobId}]: downloading audio for ${youtubeUrl}`);
-    await runYtDlpWithRetry(
-      ['--no-playlist', '-f', 'bestaudio/best', '-o', path.join(workDir, 'audio.%(ext)s'), youtubeUrl],
-      `transcript-audio ${jobId}`
-    );
+    let audioInput = mediaUrl;
+    if (!mediaUrl) {
+      console.log(`[transcript ${jobId}]: downloading audio for ${youtubeUrl}`);
+      await runYtDlpWithRetry(
+        ['--no-playlist', '-f', 'bestaudio/best', '-o', path.join(workDir, 'audio.%(ext)s'), youtubeUrl],
+        `transcript-audio ${jobId}`
+      );
+      const files = await readdir(workDir);
+      const audioFile = files.find((f) => f.startsWith('audio.'));
+      if (!audioFile) throw new Error('yt-dlp did not produce an audio file.');
+      audioInput = path.join(workDir, audioFile);
+    }
 
-    const files = await readdir(workDir);
-    const audioFile = files.find((f) => f.startsWith('audio.'));
-    if (!audioFile) throw new Error('yt-dlp did not produce an audio file.');
-
-    const wavPath = path.join(workDir, 'audio.wav');
     console.log(`[transcript ${jobId}]: converting to 16kHz mono wav`);
     await execFileAsync(
       'ffmpeg',
-      ['-y', '-i', path.join(workDir, audioFile), '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
-      { timeout: 5 * 60 * 1000 }
+      ['-y', '-i', audioInput, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
+      { timeout: 15 * 60 * 1000 }
     );
 
     console.log(`[transcript ${jobId}]: transcribing with whisper.cpp (this can take a while)`);
@@ -247,14 +308,12 @@ async function runTranscriptionJob(jobId, youtubeUrl) {
       status: transcript.length ? 'done' : 'error',
       transcript,
       error: transcript.length ? undefined : 'No speech detected in this video.',
-      updatedAt: Date.now(),
     });
   } catch (err) {
     console.error(`[transcript ${jobId}] failed:`, err?.stderr?.toString?.() || err?.message || err);
     transcriptJobs.set(jobId, {
       status: 'error',
       error: describeWorkerError(err, 'Transcribing this video failed. Try a different video.'),
-      updatedAt: Date.now(),
     });
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -281,6 +340,12 @@ function describeWorkerError(err, fallback) {
   }
   if (/429|Too Many Requests/i.test(raw)) {
     return 'YouTube is rate-limiting requests right now. Try again in a few minutes.';
+  }
+  if (/Invalid data found|moov atom not found|does not contain any stream|Server returned 4\d\d/i.test(raw)) {
+    return "Couldn't read that video file. Try re-exporting it as MP4 and uploading again.";
+  }
+  if (/SIGKILL|killed/i.test(raw)) {
+    return 'The worker ran out of memory on this job. Try a shorter video or clip.';
   }
   if (/ETIMEDOUT|ENOTFOUND|ECONNRESET|network/i.test(raw)) {
     return 'A network error interrupted processing. Try again.';

@@ -26,20 +26,17 @@ export async function POST(req: Request) {
 
       await prisma.approvalQueue.update({ where: { id }, data: { status: 'approved' } });
 
-      // Repurposed clips (item.clipId set): render the real cut if the
-      // worker is connected. Autopilot-generated scripts have no source
-      // clip to cut — those just move to "pending" until a worker exists.
+      // Repurposed clips: start rendering the real cut in the background.
+      // Progress shows on the clip in Repurpose Studio.
       if (item.clipId && renderWorkerConfigured()) {
         try {
+          await RepurposingService.startRender(item.clipId, '9:16', 'Dynamic Pop');
           await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'rendering' } });
-          const videoUrl = await RepurposingService.renderClip(item.clipId, '9:16', 'Dynamic Pop');
-          await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'rendered' } });
-          await NotificationService.sendDiscordNotification('Clip rendered', `"${item.topic}" has a real cut ready.`, 'success');
-          return NextResponse.json({ success: true, message: 'Approved and rendered — the real clip is ready.', videoUrl });
+          return NextResponse.json({ success: true, message: 'Approved — rendering started. Track it on the clip in Repurpose Studio.' });
         } catch (renderErr) {
-          const message = renderErr instanceof Error ? renderErr.message : 'Render failed.';
+          const message = renderErr instanceof Error ? renderErr.message : 'Render failed to start.';
           await prisma.approvalQueue.update({ where: { id }, data: { renderStatus: 'failed', renderError: message } });
-          return NextResponse.json({ success: true, message: `Approved, but rendering failed: ${message}` });
+          return NextResponse.json({ success: true, message: `Approved, but rendering couldn't start: ${message}` });
         }
       }
 
@@ -65,9 +62,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
   } catch (error: unknown) {
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    console.error('[API /api/approval]', error);
+    return NextResponse.json({ success: false, error: 'Could not update this item.' }, { status: 500 });
   }
 }

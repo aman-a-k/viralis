@@ -7,7 +7,7 @@ import { ProjectData, ClipData } from '@/types';
 import {
   Scissors, Copy, Check, Send, Sparkles, RefreshCw, Video, ExternalLink,
   AlertTriangle, FileText, Radar, Smartphone, Square, Monitor, Eye, Rocket,
-  Link2, Flame, Coffee, TrendingUp, BookOpen, Download,
+  Link2, Flame, Coffee, TrendingUp, BookOpen, Download, Upload, Film,
 } from 'lucide-react';
 
 interface Props {
@@ -52,6 +52,8 @@ const AUTOMATIC_STATUSES = [
 ];
 
 const TRANSCRIBING_STATUS = 'Transcribing the audio — this can take a few minutes for longer videos…';
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const RENDER_POLL_MS = 6000;
 const POLL_INTERVAL_MS = 6000;
 const POLL_TIMEOUT_MS = 25 * 60 * 1000; // matches the worker's own job ceiling
 
@@ -102,7 +104,12 @@ export function RepurposeStudioView({
   defaultCaptionStyle,
 }: Props) {
   const [tab, setTab] = useState<'video' | 'transcript'>('video');
-  const [mode, setMode] = useState<'automatic' | 'browse' | 'link'>('automatic');
+  const [mode, setMode] = useState<'automatic' | 'browse' | 'link' | 'upload'>('automatic');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [renderRatio, setRenderRatio] = useState<Record<string, string>>({});
+  const [startingRender, setStartingRender] = useState<string>('');
   const [url, setUrl] = useState('');
   const [transcript, setTranscript] = useState('');
   const [clipCount, setClipCount] = useState(5);
@@ -331,16 +338,7 @@ export function RepurposeStudioView({
       onRefresh();
 
       if (data.transcribing) {
-        toast.loading(data.message || TRANSCRIBING_STATUS, { id: 'an' });
-        setLinkStatus(TRANSCRIBING_STATUS);
-        const polled = await pollProject(data.project.id, { autoQueue: false });
-        if (!polled.ok || polled.status === 'failed') {
-          toast.error((!polled.ok ? polled.error : polled.error) || 'Transcription failed.', { id: 'an', duration: 8000 });
-          onRefresh();
-          return;
-        }
-        toast.success(`Analyzed "${polled.project.title}" — surfaced ${polled.clips.length} clips.`, { id: 'an', duration: 4000 });
-        onRefresh();
+        await followTranscription(data.project.id, data.message);
         return;
       }
 
@@ -349,6 +347,80 @@ export function RepurposeStudioView({
       toast.error('Network error contacting the analyzer.', { id: 'an' });
     } finally {
       setBusy(false);
+      setLinkStatus('');
+    }
+  };
+
+  // Waits out worker-side transcription for a project that just started
+  // (from a link or an upload), then reports how it went.
+  const followTranscription = async (projectId: string, message?: string) => {
+    toast.loading(message || TRANSCRIBING_STATUS, { id: 'an' });
+    setLinkStatus(TRANSCRIBING_STATUS);
+    const polled = await pollProject(projectId, { autoQueue: false });
+    if (!polled.ok || polled.status === 'failed') {
+      toast.error(polled.error || 'Transcription failed.', { id: 'an', duration: 8000 });
+      onRefresh();
+      return;
+    }
+    toast.success(`Analyzed "${polled.project.title}" — surfaced ${polled.clips.length} clips.`, { id: 'an', duration: 4000 });
+    onRefresh();
+  };
+
+  // Uploads the file straight from the browser to Vercel Blob (serverless
+  // request bodies are capped at 4.5MB), then has the worker transcribe it.
+  // No YouTube involved, so this works even when YouTube blocks the worker.
+  const ingestUpload = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (busy || !uploadFile) return;
+    if (!/^(video|audio)\//.test(uploadFile.type)) {
+      toast.error('Choose a video or audio file.');
+      return;
+    }
+    if (uploadFile.size > MAX_UPLOAD_BYTES) {
+      toast.error('That file is over 500MB. Trim or compress it first.');
+      return;
+    }
+
+    setBusy(true);
+    setLinkStatus('');
+    setUploadProgress(0);
+    toast.loading('Uploading…', { id: 'an' });
+    try {
+      const { upload } = await import('@vercel/blob/client');
+      const safeName = uploadFile.name.replace(/[^\w.-]+/g, '_').slice(-120) || 'video.mp4';
+      const blob = await upload(`uploads/${safeName}`, uploadFile, {
+        access: 'public',
+        handleUploadUrl: '/api/repurpose/upload-token',
+        multipart: uploadFile.size > 50 * 1024 * 1024,
+        onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
+      });
+      setUploadProgress(null);
+
+      const res = await fetch('/api/repurpose/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mediaUrl: blob.url,
+          title: uploadTitle.trim() || uploadFile.name.replace(/\.[^.]+$/, ''),
+          ...runConfig(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        toast.error(data.error || 'Could not start analysis.', { id: 'an', duration: 8000 });
+        onRefresh();
+        return;
+      }
+      setUploadFile(null);
+      setUploadTitle('');
+      setSelectedProjectId(data.project.id);
+      onRefresh();
+      await followTranscription(data.project.id, data.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed.', { id: 'an', duration: 8000 });
+    } finally {
+      setBusy(false);
+      setUploadProgress(null);
       setLinkStatus('');
     }
   };
@@ -455,6 +527,55 @@ export function RepurposeStudioView({
     }
   };
 
+  const canRender = activeProject?.sourceType === 'youtube' || activeProject?.sourceType === 'upload';
+
+  const startRender = async (clip: ClipData) => {
+    const aspectRatio = renderRatio[clip.id] || parseAspectRatios(clip.aspectRatios)[0] || '9:16';
+    setStartingRender(clip.id);
+    toast.loading('Starting render… (the worker may take up to a minute to wake up)', { id: `r-${clip.id}` });
+    try {
+      const res = await fetch('/api/repurpose/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId: clip.id, aspectRatio, captionStyle }),
+      });
+      const data = await res.json();
+      if (data.success) toast.success('Rendering — this usually takes a few minutes.', { id: `r-${clip.id}` });
+      else toast.error(data.error || 'Could not start rendering.', { id: `r-${clip.id}`, duration: 8000 });
+      onRefresh();
+    } catch {
+      toast.error('Network error starting the render.', { id: `r-${clip.id}` });
+    } finally {
+      setStartingRender('');
+    }
+  };
+
+  // While any clip in view is rendering, check on it until it finishes.
+  const renderingIds = clips.filter((c) => c.renderStatus === 'rendering').map((c) => c.id).join(',');
+  useEffect(() => {
+    if (!renderingIds) return;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      for (const clipId of renderingIds.split(',')) {
+        try {
+          const res = await fetch(`/api/repurpose/render?clipId=${encodeURIComponent(clipId)}`);
+          const data = await res.json();
+          if (cancelled || !data.success || data.renderStatus === 'rendering') continue;
+          if (data.renderStatus === 'rendered') toast.success('Clip rendered — ready to download.', { id: `r-${clipId}` });
+          if (data.renderStatus === 'failed') toast.error(data.renderError || 'Render failed.', { id: `r-${clipId}`, duration: 8000 });
+          onRefresh();
+        } catch {
+          /* transient — try again next tick */
+        }
+      }
+    }, RENDER_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderingIds]);
+
   const copy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -505,6 +626,9 @@ export function RepurposeStudioView({
               </button>
               <button className={`segmented-item ${mode === 'link' ? 'active' : ''}`} onClick={() => setMode('link')}>
                 <Link2 size={13} /> Paste a link
+              </button>
+              <button className={`segmented-item ${mode === 'upload' ? 'active' : ''}`} onClick={() => setMode('upload')}>
+                <Upload size={13} /> Upload a file
               </button>
             </div>
 
@@ -644,6 +768,49 @@ export function RepurposeStudioView({
                     {busy ? 'Analyzing…' : 'Analyze'}
                   </button>
                 </form>
+                {linkStatus && (
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>{linkStatus}</p>
+                )}
+              </>
+            )}
+
+            {mode === 'upload' && (
+              <>
+                <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
+                  Upload your own video (MP4, MOV, WebM — up to 500MB). It&apos;s transcribed and cut from the file itself, so it works for anything, not just YouTube.
+                </p>
+                <form onSubmit={ingestUpload} style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <label className="btn btn-secondary" style={{ cursor: busy ? 'not-allowed' : 'pointer', maxWidth: '100%' }}>
+                    <Film size={14} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
+                      {uploadFile ? uploadFile.name : 'Choose a video…'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="video/*,audio/*"
+                      disabled={busy}
+                      style={{ display: 'none' }}
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <input
+                    className="input-field"
+                    style={{ flex: '1 1 220px' }}
+                    placeholder="Title (optional)"
+                    value={uploadTitle}
+                    maxLength={200}
+                    onChange={(e) => setUploadTitle(e.target.value)}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={busy || !uploadFile} style={{ minWidth: 150 }}>
+                    {busy ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploadProgress !== null ? `Uploading ${uploadProgress}%` : busy ? 'Analyzing…' : 'Upload & analyze'}
+                  </button>
+                </form>
+                {uploadProgress !== null && (
+                  <div style={{ height: 4, background: 'var(--surface-3)', borderRadius: 2, overflow: 'hidden' }} aria-label="Upload progress">
+                    <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.2s' }} />
+                  </div>
+                )}
                 {linkStatus && (
                   <p className="text-subtle" style={{ fontSize: '0.75rem' }}>{linkStatus}</p>
                 )}
@@ -812,7 +979,8 @@ export function RepurposeStudioView({
                         <span className="badge badge-neutral">{clip.duration}s</span>
                         <span className="badge badge-primary">{humanizeHook(clip.hookType)}</span>
                         {queued && !clip.videoUrl && <span className="badge badge-success"><Check size={10} /> In queue</span>}
-                        {clip.videoUrl && <span className="badge badge-success"><Video size={10} /> Rendered</span>}
+                        {clip.renderStatus === 'rendering' && <span className="badge badge-warning"><RefreshCw size={10} className="animate-spin" /> Rendering…</span>}
+                        {clip.videoUrl && clip.renderStatus !== 'rendering' && <span className="badge badge-success"><Video size={10} /> Rendered</span>}
                         {parseAspectRatios(clip.aspectRatios).map((o: string) => (
                           <span key={o} className="badge badge-neutral">{o}</span>
                         ))}
@@ -866,7 +1034,41 @@ export function RepurposeStudioView({
                     />
                   )}
 
+                  {clip.renderStatus === 'failed' && clip.renderError && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--red, #f87171)', display: 'flex', gap: '0.35rem', alignItems: 'flex-start' }}>
+                      <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> Render failed: {clip.renderError}
+                    </p>
+                  )}
+
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {canRender && (
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <select
+                          className="input-field"
+                          style={{ width: 84, padding: '0.3rem 0.4rem', fontSize: '0.75rem' }}
+                          aria-label="Render aspect ratio"
+                          value={renderRatio[clip.id] || parseAspectRatios(clip.aspectRatios)[0] || '9:16'}
+                          disabled={clip.renderStatus === 'rendering'}
+                          onChange={(e) => setRenderRatio((prev) => ({ ...prev, [clip.id]: e.target.value }))}
+                        >
+                          {ORIENTATIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={clip.renderStatus === 'rendering' || startingRender === clip.id}
+                          onClick={() => startRender(clip)}
+                        >
+                          {clip.renderStatus === 'rendering' || startingRender === clip.id
+                            ? <RefreshCw size={13} className="animate-spin" />
+                            : <Film size={13} />}
+                          {clip.renderStatus === 'rendering'
+                            ? 'Rendering…'
+                            : clip.renderStatus === 'failed'
+                              ? 'Retry render'
+                              : clip.videoUrl ? 'Re-render' : 'Render video'}
+                        </button>
+                      </div>
+                    )}
                     {ytLink && (
                       <a href={ytLink} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
                         <Video size={13} /> Play at {fmt(clip.startTime)}

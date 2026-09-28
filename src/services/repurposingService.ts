@@ -3,12 +3,16 @@ import { analyzeTranscript, MissingApiKeyError, type AnalyzedClip, type AnalyzeO
 import { fetchYouTubeVideo, fetchYouTubeMetadata, isYouTubeUrl, type TranscriptSegment } from './youtubeService';
 import { describeLlmError } from '../lib/llm';
 import {
-  renderClipOnWorker,
   renderWorkerConfigured,
   startTranscriptJob,
   getTranscriptJobStatus,
+  startRenderJob,
+  getRenderJobStatus,
   warmUpWorker,
+  WorkerJobLostError,
+  type MediaSource,
 } from '../lib/renderWorker';
+import { isBlobUrl } from '../lib/blob';
 
 export interface RunConfig {
   /** Platforms to generate captions for. Defaults to all five. */
@@ -133,7 +137,7 @@ export class RepurposingService {
    */
   private static async ingestYouTubeAsync(url: string, desiredClipCount: number, config: RunConfig) {
     const meta = await fetchYouTubeMetadata(url);
-    const jobId = await startTranscriptJob(meta.url);
+    const jobId = await startTranscriptJob({ youtubeUrl: meta.url });
     if (!jobId) {
       throw new Error('Could not start transcription — the render worker is not reachable.');
     }
@@ -156,6 +160,31 @@ export class RepurposingService {
   }
 
   /**
+   * Starts analysis of a video file the user uploaded to Vercel Blob: the
+   * worker transcribes it straight from the file (no YouTube involved), then
+   * pollTranscription() finishes exactly like the YouTube path.
+   */
+  static async ingestUpload(mediaUrl: string, title: string, desiredClipCount = 5, config: RunConfig = {}) {
+    if (!isBlobUrl(mediaUrl)) throw new Error('That upload URL isn’t from this app’s storage.');
+    const jobId = await startTranscriptJob({ mediaUrl });
+    if (!jobId) {
+      throw new Error('Uploaded videos need the render worker for transcription, and it isn’t connected.');
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        title: title.trim().slice(0, 200) || 'Uploaded video',
+        sourceVideoUrl: mediaUrl,
+        sourceType: 'upload',
+        status: 'transcribing',
+        transcriptJobId: jobId,
+        metadata: JSON.stringify({ desiredClipCount, config, ingestedAt: new Date().toISOString() }),
+      },
+    });
+    return { project, clips: [] as never[], transcribing: true as const };
+  }
+
+  /**
    * Checks a worker transcription job and, once it finishes, runs analysis
    * and persists clips — same end state as the synchronous ingestYouTube
    * path, just split across polls. Safe to call repeatedly; once the project
@@ -173,7 +202,13 @@ export class RepurposingService {
       throw new Error('This project has no transcription job to check.');
     }
 
-    const jobStatus = await getTranscriptJobStatus(project.transcriptJobId);
+    let jobStatus;
+    try {
+      jobStatus = await getTranscriptJobStatus(project.transcriptJobId);
+    } catch (err) {
+      if (!(err instanceof WorkerJobLostError)) throw err;
+      jobStatus = { status: 'error' as const, error: 'Transcription was interrupted (the worker restarted). Try again.' };
+    }
     if (jobStatus.status === 'processing') {
       return { status: 'transcribing' as const, project, clips: [] as never[] };
     }
@@ -391,24 +426,29 @@ export class RepurposingService {
   }
 
   /**
-   * Cuts the real clip via the standalone render worker (see /worker) and
-   * saves the resulting video URL. Throws RenderWorkerNotConfiguredError if
-   * the worker isn't wired up yet.
+   * Starts a background render of a clip on the worker (from the YouTube
+   * source or the uploaded file) and marks it "rendering"; pollRender()
+   * picks up the result. Throws RenderWorkerNotConfiguredError if the worker
+   * isn't wired up.
    */
-  static async renderClip(
+  static async startRender(
     clipId: string,
     aspectRatio: '9:16' | '1:1' | '16:9' = '9:16',
     captionStyle: string = 'Dynamic Pop'
-  ): Promise<string> {
+  ) {
     const clip = await prisma.clip.findUnique({ where: { id: clipId }, include: { project: true } });
     if (!clip) throw new Error('Clip not found.');
-    if (!clip.project.sourceVideoUrl || clip.project.sourceType !== 'youtube') {
-      throw new Error('This clip has no YouTube source to render from (it came from a pasted transcript).');
-    }
+    if (clip.renderStatus === 'rendering') return clip;
 
-    const videoUrl = await renderClipOnWorker({
+    const { sourceType, sourceVideoUrl } = clip.project;
+    let source: MediaSource;
+    if (sourceType === 'youtube' && sourceVideoUrl) source = { youtubeUrl: sourceVideoUrl };
+    else if (sourceType === 'upload' && sourceVideoUrl && isBlobUrl(sourceVideoUrl)) source = { mediaUrl: sourceVideoUrl };
+    else throw new Error('This clip has no source video to render from (it came from a pasted transcript).');
+
+    const renderJobId = await startRenderJob({
+      ...source,
       clipId: clip.id,
-      youtubeUrl: clip.project.sourceVideoUrl,
       startTime: clip.startTime,
       endTime: clip.endTime,
       aspectRatio,
@@ -416,8 +456,41 @@ export class RepurposingService {
       captionStyle,
     });
 
-    await prisma.clip.update({ where: { id: clipId }, data: { videoUrl } });
-    return videoUrl;
+    return prisma.clip.update({
+      where: { id: clipId },
+      data: { renderStatus: 'rendering', renderJobId, renderError: null },
+    });
+  }
+
+  /** Checks a clip's render job and records the result once it finishes. */
+  static async pollRender(clipId: string) {
+    const clip = await prisma.clip.findUnique({ where: { id: clipId } });
+    if (!clip) throw new Error('Clip not found.');
+    if (clip.renderStatus !== 'rendering' || !clip.renderJobId) return clip;
+
+    let status;
+    try {
+      status = await getRenderJobStatus(clip.renderJobId);
+    } catch (err) {
+      if (!(err instanceof WorkerJobLostError)) throw err;
+      status = { status: 'error' as const, error: err.message };
+    }
+    if (status.status === 'processing') return clip;
+
+    if (status.status === 'error') {
+      return prisma.clip.update({
+        where: { id: clipId },
+        data: { renderStatus: 'failed', renderError: status.error, renderJobId: null },
+      });
+    }
+
+    const updated = await prisma.clip.update({
+      where: { id: clipId },
+      data: { renderStatus: 'rendered', videoUrl: status.videoUrl, renderJobId: null, renderError: null },
+    });
+    const { NotificationService } = await import('./notifications');
+    await NotificationService.sendDiscordNotification('Clip rendered', `"${updated.title}" is ready to download.`, 'success');
+    return updated;
   }
 }
 
