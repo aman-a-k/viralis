@@ -3,16 +3,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { humanizeHook } from '@/lib/hookLabels';
+import { renderClip } from '@/lib/renderClient';
 import { ProjectData, ClipData } from '@/types';
 import {
   Scissors, Copy, Check, Send, Sparkles, RefreshCw, Video, ExternalLink,
   AlertTriangle, FileText, Radar, Smartphone, Square, Monitor, Eye, Rocket,
-  Link2, Flame, Coffee, TrendingUp, BookOpen, Download,
+  Link2, Flame, Coffee, TrendingUp, BookOpen, Download, X, Clapperboard,
 } from 'lucide-react';
 
 interface Props {
   projects: ProjectData[];
   onRefresh: () => void;
+  /** Controlled by the dashboard so search / Overview can open a project. */
+  selectedProjectId: string;
+  onSelectProject: (id: string) => void;
+  renderWorkerConfigured?: boolean;
   defaultPlatforms?: string[];
   defaultOrientations?: string[];
   defaultCaptionStyle?: string;
@@ -60,6 +65,50 @@ interface TrendingVideo {
   viewCount: number; durationSeconds: number; vibe: Vibe;
 }
 
+type PollResult =
+  | { ok: true; status: 'ready'; project: ProjectData; clips: ClipData[]; queued?: number }
+  | { ok: true; status: 'failed'; error: string }
+  | { ok: false; error: string };
+
+// Shared by both the automatic and manual-link flows: when the analyzer's
+// direct transcript fetch gets blocked by YouTube, ingestion falls back to
+// worker-side whisper.cpp transcription, which runs as a background job
+// (it can take far longer than any single request should wait on). This
+// polls until it finishes, fails, or we give up waiting.
+async function pollProject(projectId: string, opts: { autoQueue?: boolean } = {}): Promise<PollResult> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  let processingPolls = 0;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    try {
+      const res = await fetch('/api/repurpose/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, autoQueue: opts.autoQueue }),
+      });
+      const data = await res.json();
+      if (!data.success) return { ok: false, error: data.error || 'Polling failed.' };
+      if (data.status === 'transcribing') continue;
+      // "processing" = transcription finished and another poll (e.g. a second
+      // tab) is running the analysis — wait for it, but only about as long as
+      // one analysis request can run.
+      if (data.status === 'processing') {
+        if (++processingPolls * POLL_INTERVAL_MS > 3 * 60 * 1000) {
+          return { ok: false, error: 'Analysis didn’t finish. Open the project and click Re-analyze.' };
+        }
+        continue;
+      }
+      if (data.status === 'failed') {
+        return { ok: true, status: 'failed', error: data.project?.errorMessage || 'Transcription failed.' };
+      }
+      return { ok: true, status: 'ready', project: data.project, clips: data.clips, queued: data.queued };
+    } catch {
+      // transient network error mid-poll — keep trying until the deadline
+    }
+  }
+  return { ok: false, error: 'This is taking longer than expected. Check back in a few minutes — it may still finish in the background.' };
+}
+
 function fmt(s: number): string {
   const t = Math.max(0, Math.floor(s));
   const m = Math.floor(t / 60);
@@ -97,6 +146,9 @@ function parseAspectRatios(raw: ClipData['aspectRatios']): string[] {
 export function RepurposeStudioView({
   projects = [],
   onRefresh,
+  selectedProjectId,
+  onSelectProject: setSelectedProjectId,
+  renderWorkerConfigured = false,
   defaultPlatforms,
   defaultOrientations,
   defaultCaptionStyle,
@@ -126,7 +178,6 @@ export function RepurposeStudioView({
   const [lastAutoResult, setLastAutoResult] = useState<{ title: string; channel: string; clipsCreated: number; clipsQueued: number } | null>(null);
   const statusTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [platform, setPlatform] = useState<Platform>('instagram');
   const [copiedKey, setCopiedKey] = useState<string>('');
   const [linkStatus, setLinkStatus] = useState('');
@@ -136,9 +187,16 @@ export function RepurposeStudioView({
     [projects, selectedProjectId]
   );
   const clips = useMemo(
-    () => [...(activeProject?.clips || [])].sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0)),
+    () =>
+      [...(activeProject?.clips || [])]
+        .filter((c) => c.status !== 'rejected')
+        .sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0)),
     [activeProject]
   );
+
+  // Per-clip render state: orientation picked and whether a render is running.
+  const [renderRatio, setRenderRatio] = useState<Record<string, string>>({});
+  const [rendering, setRendering] = useState<Record<string, boolean>>({});
 
   useEffect(() => () => { if (statusTimer.current) clearInterval(statusTimer.current); }, []);
 
@@ -175,15 +233,13 @@ export function RepurposeStudioView({
     }
   };
 
-  // Auto-load trending videos the moment this tab is opened, instead of
-  // making the user press "Find trending videos" first — the button then
-  // doubles as a manual refresh (still honoring the region/category filters).
-  useEffect(() => {
-    if (mode === 'browse' && trendingVideos.length === 0 && !trendingLoading) {
-      findTrending();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  // Load trending videos the moment Browse is opened instead of making the
+  // user press "Find trending videos" first — the button then doubles as a
+  // manual refresh (still honoring the region/category filters).
+  const openBrowse = () => {
+    setMode('browse');
+    if (trendingVideos.length === 0 && !trendingLoading) findTrending();
+  };
 
   const visibleTrending = vibeFilter === 'all' ? trendingVideos : trendingVideos.filter((v) => v.vibe === vibeFilter);
 
@@ -208,45 +264,6 @@ export function RepurposeStudioView({
     statusTimer.current = null;
   };
 
-  // Shared by both the automatic and manual-link flows: when the analyzer's
-  // direct transcript fetch gets blocked by YouTube, ingestion falls back to
-  // worker-side whisper.cpp transcription, which runs as a background job
-  // (it can take far longer than any single request should wait on). This
-  // polls until it finishes, fails, or we give up waiting.
-  const pollProject = async (
-    projectId: string,
-    opts: { autoQueue?: boolean; onTick?: () => void } = {}
-  ): Promise<
-    | { ok: true; status: 'ready'; project: ProjectData; clips: ClipData[]; queued?: number }
-    | { ok: true; status: 'failed'; error: string }
-    | { ok: false; error: string }
-  > => {
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      try {
-        const res = await fetch('/api/repurpose/poll', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, autoQueue: opts.autoQueue }),
-        });
-        const data = await res.json();
-        if (!data.success) return { ok: false, error: data.error || 'Polling failed.' };
-        if (data.status === 'transcribing') {
-          opts.onTick?.();
-          continue;
-        }
-        if (data.status === 'failed') {
-          return { ok: true, status: 'failed', error: data.project?.errorMessage || 'Transcription failed.' };
-        }
-        return { ok: true, status: 'ready', project: data.project, clips: data.clips, queued: data.queued };
-      } catch {
-        // transient network error mid-poll — keep trying until the deadline
-      }
-    }
-    return { ok: false, error: 'This is taking longer than expected. Check back in a few minutes — it may still finish in the background.' };
-  };
-
   const runAutomatic = async () => {
     setAutomating(true);
     setLastAutoResult(null);
@@ -268,7 +285,7 @@ export function RepurposeStudioView({
         setAutoStatus(TRANSCRIBING_STATUS);
         const polled = await pollProject(data.result.projectId, { autoQueue: true });
         if (!polled.ok || polled.status === 'failed') {
-          toast.error((!polled.ok ? polled.error : polled.error) || 'Transcription failed.', { duration: 8000 });
+          toast.error(polled.error || 'Transcription failed.', { duration: 8000 });
           onRefresh();
           return;
         }
@@ -335,7 +352,7 @@ export function RepurposeStudioView({
         setLinkStatus(TRANSCRIBING_STATUS);
         const polled = await pollProject(data.project.id, { autoQueue: false });
         if (!polled.ok || polled.status === 'failed') {
-          toast.error((!polled.ok ? polled.error : polled.error) || 'Transcription failed.', { id: 'an', duration: 8000 });
+          toast.error(polled.error || 'Transcription failed.', { id: 'an', duration: 8000 });
           onRefresh();
           return;
         }
@@ -423,11 +440,49 @@ export function RepurposeStudioView({
         body: JSON.stringify({ action: 'approve_to_queue' }),
       });
       const data = await res.json();
-      data.success ? toast.success(data.message, { id: 'q' }) : toast.error(data.error, { id: 'q' });
-      if (data.success) onRefresh();
+      if (data.success) {
+        toast.success(data.message, { id: 'q' });
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Could not queue this clip.', { id: 'q' });
+      }
     } catch {
       toast.error('Network error.', { id: 'q' });
     }
+  };
+
+  const dismissClip = async (clipId: string) => {
+    try {
+      const res = await fetch(`/api/repurpose/clip/${clipId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Clip dismissed.');
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Could not dismiss this clip.');
+      }
+    } catch {
+      toast.error('Network error.');
+    }
+  };
+
+  const startRender = async (clip: ClipData, ratio: string) => {
+    if (rendering[clip.id]) return;
+    setRendering((r) => ({ ...r, [clip.id]: true }));
+    const toastId = `render-${clip.id}`;
+    toast.loading(`Rendering "${clip.title}" (${ratio}) — this can take a few minutes…`, { id: toastId });
+    const result = await renderClip(clip.id, { aspectRatio: ratio, captionStyle });
+    setRendering((r) => ({ ...r, [clip.id]: false }));
+    if (result.ok) {
+      toast.success('Rendered — the clip is ready to watch and download.', { id: toastId, duration: 5000 });
+    } else {
+      toast.error(result.error, { id: toastId, duration: 8000 });
+    }
+    onRefresh();
   };
 
   // One-shot check for a project that's stuck showing "transcribing" after a
@@ -454,6 +509,28 @@ export function RepurposeStudioView({
       toast.error('Network error.', { id: 'chk' });
     }
   };
+
+  // A project left in "transcribing" (page reloaded, or started in another
+  // tab) only advances when something polls it — do that in the background
+  // while it's on screen, unless this tab's own poll loop is already running.
+  const watchId = activeProject?.status === 'transcribing' && !busy && !automating ? activeProject.id : null;
+  useEffect(() => {
+    if (!watchId) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/repurpose/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: watchId }),
+        });
+        const data = await res.json();
+        if (data.success && data.status !== 'transcribing') onRefresh();
+      } catch {
+        /* try again next tick */
+      }
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [watchId, onRefresh]);
 
   const copy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -500,7 +577,7 @@ export function RepurposeStudioView({
               <button className={`segmented-item ${mode === 'automatic' ? 'active' : ''}`} onClick={() => setMode('automatic')}>
                 <Rocket size={13} /> Automatic
               </button>
-              <button className={`segmented-item ${mode === 'browse' ? 'active' : ''}`} onClick={() => setMode('browse')}>
+              <button className={`segmented-item ${mode === 'browse' ? 'active' : ''}`} onClick={openBrowse}>
                 <Radar size={13} /> Browse trending
               </button>
               <button className={`segmented-item ${mode === 'link' ? 'active' : ''}`} onClick={() => setMode('link')}>
@@ -757,7 +834,7 @@ export function RepurposeStudioView({
                   <ExternalLink size={13} /> Source
                 </a>
               )}
-              <button className="btn btn-secondary btn-sm" disabled={busy} onClick={reanalyze}>
+              <button className="btn btn-secondary btn-sm" disabled={busy || activeProject?.status === 'transcribing'} onClick={reanalyze}>
                 <RefreshCw size={13} className={busy ? 'animate-spin' : ''} /> Re-analyze
               </button>
             </div>
@@ -767,6 +844,15 @@ export function RepurposeStudioView({
             <div className="panel-card" style={{ borderColor: 'var(--red-line)', display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
               <AlertTriangle size={16} style={{ color: 'var(--red)', flexShrink: 0, marginTop: 2 }} />
               <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)' }}>{activeProject.errorMessage}</p>
+            </div>
+          )}
+
+          {activeProject?.status === 'processing' && !busy && !automating && (
+            <div className="panel-card" style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+              <RefreshCw size={16} className="animate-spin" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-2)', flex: 1 }}>
+                Finding the best moments… If this doesn&apos;t finish within a couple of minutes, click Re-analyze.
+              </p>
             </div>
           )}
 
@@ -791,7 +877,15 @@ export function RepurposeStudioView({
                 ? `https://youtu.be/${activeProject.sourceVideoId}?t=${Math.floor(clip.startTime)}`
                 : null;
               const clipPlatforms = PLATFORMS.filter((p) => caps[p]);
+              // The platform tab is shared across cards; fall back to one this
+              // clip actually has copy for instead of showing an empty box.
+              const shownPlatform: Platform = caps[platform] || !clipPlatforms.length ? platform : clipPlatforms[0];
               const queued = clip.status === 'approved';
+              const clipRatios = parseAspectRatios(clip.aspectRatios).filter((o) => (ORIENTATIONS as readonly string[]).includes(o));
+              const ratioChoices = clipRatios.length ? clipRatios : [...ORIENTATIONS];
+              const ratio = renderRatio[clip.id] && ratioChoices.includes(renderRatio[clip.id]) ? renderRatio[clip.id] : ratioChoices[0];
+              const canRender = activeProject?.sourceType === 'youtube' && Boolean(activeProject?.sourceVideoUrl);
+              const isRendering = Boolean(rendering[clip.id]);
               return (
                 <div key={clip.id} className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                   <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
@@ -833,7 +927,7 @@ export function RepurposeStudioView({
                         <button
                           key={p}
                           onClick={() => setPlatform(p)}
-                          className={`filter-chip ${platform === p ? 'active' : ''}`}
+                          className={`filter-chip ${shownPlatform === p ? 'active' : ''}`}
                           style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem' }}
                         >
                           {PLATFORM_LABEL[p]}
@@ -845,15 +939,15 @@ export function RepurposeStudioView({
                         readOnly
                         className="input-field"
                         style={{ minHeight: 96, fontSize: '0.8125rem', paddingRight: '2.5rem' }}
-                        value={caps[platform] || '—'}
+                        value={caps[shownPlatform] || '—'}
                       />
                       <button
                         className="icon-btn"
                         style={{ position: 'absolute', top: 6, right: 6 }}
-                        onClick={() => copy(caps[platform] || '', `${clip.id}-${platform}`)}
+                        onClick={() => copy(caps[shownPlatform] || '', `${clip.id}-${shownPlatform}`)}
                         aria-label="Copy caption"
                       >
-                        {copiedKey === `${clip.id}-${platform}` ? <Check size={14} color="var(--green)" /> : <Copy size={14} />}
+                        {copiedKey === `${clip.id}-${shownPlatform}` ? <Check size={14} color="var(--green)" /> : <Copy size={14} />}
                       </button>
                     </div>
                   </div>
@@ -885,7 +979,47 @@ export function RepurposeStudioView({
                         <Send size={13} /> Send to queue
                       </button>
                     )}
+                    {!queued && !clip.videoUrl && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => dismissClip(clip.id)}>
+                        <X size={13} /> Dismiss
+                      </button>
+                    )}
                   </div>
+
+                  {canRender && (
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+                      <span className="text-subtle" style={{ fontSize: '0.72rem', fontWeight: 600 }}>
+                        {clip.videoUrl ? 'Render again' : 'Render video'}
+                      </span>
+                      <div className="segmented-control">
+                        {ratioChoices.map((o) => (
+                          <button
+                            key={o}
+                            type="button"
+                            disabled={isRendering}
+                            className={`segmented-item ${ratio === o ? 'active' : ''}`}
+                            onClick={() => setRenderRatio((r) => ({ ...r, [clip.id]: o }))}
+                          >
+                            {o}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={isRendering || !renderWorkerConfigured}
+                        onClick={() => startRender(clip, ratio)}
+                        title={renderWorkerConfigured ? undefined : 'Connect the render worker first (see worker/README.md).'}
+                      >
+                        {isRendering ? <RefreshCw size={13} className="animate-spin" /> : <Clapperboard size={13} />}
+                        {isRendering ? 'Rendering…' : 'Render'}
+                      </button>
+                      {!renderWorkerConfigured && (
+                        <span className="text-subtle" style={{ fontSize: '0.72rem' }}>
+                          Needs the render worker — see worker/README.md.
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

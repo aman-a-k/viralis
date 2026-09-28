@@ -1,15 +1,17 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import { VideoData, DashboardStats, SettingsData, AgentStatus, ProjectData } from '@/types';
-import { 
-  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle2, Clock, XCircle, Bot, Zap, 
-  History, LogOut, User as UserIcon, ClipboardCheck, RefreshCw, BarChart2, ChevronRight, 
-  Scissors, Brain, Sparkles, Flame, Sliders, Send, Search, Bell, Command, ChevronDown, 
-  Layers, ExternalLink
+import type {
+  DashboardStats, SettingsData, AgentStatus, ProjectData, ApprovalQueueItem, TrendRecord, RenderedClipData,
+} from '@/types';
+import {
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle2, Clock, XCircle, Bot, Zap,
+  History, LogOut, ClipboardCheck, RefreshCw, ChevronRight,
+  Scissors, Brain, Sparkles, Flame, Search, FileText, AlertTriangle,
 } from 'lucide-react';
 import { RepurposeStudioView } from '@/components/RepurposeStudioView';
+import { ContentLibraryView } from '@/components/ContentLibraryView';
 import { FeedbackLoopView } from '@/components/FeedbackLoopView';
 import { AgentStatusView } from '@/components/AgentStatusView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
@@ -19,23 +21,67 @@ import { signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 
+interface DashboardData {
+  projects: ProjectData[];
+  totalClipsCount: number;
+  stats: DashboardStats;
+  settings: SettingsData;
+  agents: AgentStatus[];
+  trends: TrendRecord[];
+  approvalQueue: ApprovalQueueItem[];
+  autopilotScripts: ApprovalQueueItem[];
+  renderedClips: RenderedClipData[];
+  renderWorkerConfigured: boolean;
+}
+
+type DataResult = { ok: true; data: DashboardData } | { ok: false; error: string };
+
+async function loadDashboard(): Promise<DataResult> {
+  try {
+    const res = await fetch('/api/data');
+    const json = await res.json();
+    if (!json.success) return { ok: false, error: json.error || 'Could not load your workspace.' };
+    return { ok: true, data: json.data };
+  } catch (e) {
+    console.error(e);
+    return { ok: false, error: 'Could not reach the server. Check your connection and try again.' };
+  }
+}
+
+function ScriptStatusBadge({ status }: { status: string }) {
+  const cls = status === 'approved' ? 'badge-success' : status === 'rejected' ? 'badge-danger' : 'badge-warning';
+  const Icon = status === 'approved' ? CheckCircle2 : status === 'rejected' ? XCircle : Clock;
+  return (
+    <span className={`badge ${cls}`} style={{ textTransform: 'capitalize', flexShrink: 0 }}>
+      <Icon size={11} /> {status === 'pending' ? 'In review' : status}
+    </span>
+  );
+}
+
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'repurpose', label: 'Repurpose Studio' },
+  { id: 'autopilot', label: 'Autopilot Generator' },
+  { id: 'queue', label: 'Approval Queue' },
+  { id: 'content', label: 'Content Library' },
+  { id: 'learning-loop', label: 'Learning Loop' },
+  { id: 'trends', label: 'Trend Radar' },
+  { id: 'agents', label: 'Agent Fleet' },
+  { id: 'settings', label: 'Settings' },
+];
+
 export default function Dashboard() {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
-  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [data, setData] = useState<{
-    videos: VideoData[];
-    projects: ProjectData[];
-    totalClipsCount: number;
-    stats: DashboardStats;
-    settings: SettingsData;
-    agents: AgentStatus[];
-    trends: any[];
-    approvalQueue: any[];
-  } | null>(null);
+  const [studioProjectId, setStudioProjectId] = useState('');
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
 
   // Settings State
   const [ytId, setYtId] = useState('');
@@ -77,68 +123,80 @@ export default function Dashboard() {
   const [defaultPlatforms, setDefaultPlatforms] = useState<string[]>(['instagram', 'youtube', 'tiktok']);
   const [defaultOrientations, setDefaultOrientations] = useState<string[]>(['9:16', '1:1', '16:9']);
 
-  const fetchData = async (rehydrateSettings = false) => {
-    try {
-      const res = await fetch('/api/data');
-      const json = await res.json();
-      if (json.success) {
-        setData(json.data);
-        const s = json.data.settings;
-        if (s) {
-          setHasAiKey(!!s.hasAiKey);
-          setHasYoutubeDataKey(!!s.hasYoutubeDataKey);
-          setSavedSecrets({
-            ytClientSecret: !!s.hasYoutubeClientSecret,
-            igToken: !!s.hasInstagramToken,
-            discordWebhook: !!s.hasDiscordWebhook,
-            pexelsKey: !!s.hasPexelsKey,
-            elevenLabsKey: !!s.hasElevenLabsKey,
-          });
-
-          if (!settingsHydrated.current || rehydrateSettings) {
-            settingsHydrated.current = true;
-            setYtId(s.youtubeId || '');
-            setIgId(s.instagramId || '');
-            setAiProvider(s.aiProvider || 'gemini');
-            setAiModel(s.aiModel || '');
-            setYtClientId(s.youtubeClientId || '');
-            setBrandName(s.brandName || 'Viralis');
-            setBrandNiche(s.brandNiche || 'Technology & AI');
-            setBrandTone(s.brandTone || 'Punchy & Viral');
-            setTargetAudience(s.targetAudience || 'Social Media Audience');
-            setVideoStyle(s.videoStyle || 'Cinematic Stock');
-            setCaptionStyle(s.captionStyle || 'Dynamic Pop');
-            if (Array.isArray(s.defaultPlatforms) && s.defaultPlatforms.length) {
-              setDefaultPlatforms(s.defaultPlatforms);
-            }
-            if (Array.isArray(s.defaultOrientations) && s.defaultOrientations.length) {
-              setDefaultOrientations(s.defaultOrientations);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (authStatus === 'loading') return;
-    if (authStatus !== 'authenticated') {
-      setLoading(false);
+  const applyData = useCallback((result: DataResult, rehydrateSettings = false) => {
+    if (!result.ok) {
+      setLoadError(result.error);
       return;
     }
+    setLoadError('');
+    setData(result.data);
+    const s = result.data.settings;
+    if (!s) return;
+    setHasAiKey(!!s.hasAiKey);
+    setHasYoutubeDataKey(!!s.hasYoutubeDataKey);
+    setSavedSecrets({
+      ytClientSecret: !!s.hasYoutubeClientSecret,
+      igToken: !!s.hasInstagramToken,
+      discordWebhook: !!s.hasDiscordWebhook,
+      pexelsKey: !!s.hasPexelsKey,
+      elevenLabsKey: !!s.hasElevenLabsKey,
+    });
 
-    fetchData();
-    const interval = setInterval(() => fetchData(), 30000);
+    if (!settingsHydrated.current || rehydrateSettings) {
+      settingsHydrated.current = true;
+      setYtId(s.youtubeId || '');
+      setIgId(s.instagramId || '');
+      setAiProvider(s.aiProvider || 'gemini');
+      setAiModel(s.aiModel || '');
+      setYtClientId(s.youtubeClientId || '');
+      setBrandName(s.brandName || 'Viralis');
+      setBrandNiche(s.brandNiche || 'Technology & AI');
+      setBrandTone(s.brandTone || 'Punchy & Viral');
+      setTargetAudience(s.targetAudience || 'Social Media Audience');
+      setVideoStyle(s.videoStyle || 'Cinematic Stock');
+      setCaptionStyle(s.captionStyle || 'Dynamic Pop');
+      if (Array.isArray(s.defaultPlatforms) && s.defaultPlatforms.length) {
+        setDefaultPlatforms(s.defaultPlatforms);
+      }
+      if (Array.isArray(s.defaultOrientations) && s.defaultOrientations.length) {
+        setDefaultOrientations(s.defaultOrientations);
+      }
+    }
+  }, []);
+
+  const fetchData = useCallback(async (rehydrateSettings = false) => {
+    applyData(await loadDashboard(), rehydrateSettings);
+  }, [applyData]);
+  const refresh = useCallback(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
+
+    let cancelled = false;
+    const load = () => loadDashboard().then((result) => { if (!cancelled) applyData(result); });
+    load();
+    const interval = setInterval(load, 30000);
     if (typeof window !== 'undefined' && window.location.search.includes('success=youtube_connected')) {
       toast.success("YouTube Account authorized successfully!", { id: 'oauth', duration: 5000 });
       window.history.replaceState(null, '', '/');
     }
-    return () => clearInterval(interval);
-  }, [authStatus]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [authStatus, applyData]);
+
+  // ⌘K / Ctrl+K focuses the jump-to search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const handleForceRun = async () => {
     setIsRunning(true);
@@ -149,12 +207,12 @@ export default function Dashboard() {
       const responseData = await res.json();
       
       if (responseData.success) {
-        toast.success('Workflow initiated. Check Approval Queue or Content Library!', { id: 'workflow', duration: 5000 });
-        fetchData(); 
+        toast.success(responseData.message || 'Done — check the Approval Queue.', { id: 'workflow', duration: 6000 });
       } else {
-        toast.error(responseData.error || responseData.message || 'Workflow failed to start. Check the AI key in Settings.', { id: 'workflow', duration: 5000 });
+        toast.error(responseData.error || responseData.message || 'Workflow failed. Check the AI key in Settings.', { id: 'workflow', duration: 8000 });
       }
-    } catch (err) {
+      fetchData();
+    } catch {
       toast.error('Network error triggering workflow.', { id: 'workflow' });
     } finally {
       setIsRunning(false);
@@ -204,7 +262,7 @@ export default function Dashboard() {
       }
       if (toastId) toast.error(responseData.error || "Failed to save settings.", { id: toastId });
       return false;
-    } catch (err) {
+    } catch {
       if (toastId) toast.error("Error saving settings.", { id: toastId });
       return false;
     }
@@ -219,7 +277,29 @@ export default function Dashboard() {
   const goToTab = (tab: string) => {
     setActiveTab(tab);
     setMobileNavOpen(false);
+    setSearch('');
   };
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    const pages = TABS.filter((t) => t.label.toLowerCase().includes(q) || t.id.includes(q)).map((t) => ({
+      key: `tab-${t.id}`,
+      label: t.label,
+      hint: 'Page',
+      go: () => { setActiveTab(t.id); setMobileNavOpen(false); setSearch(''); searchRef.current?.blur(); },
+    }));
+    const projectHits = (data?.projects || [])
+      .filter((p) => p.title.toLowerCase().includes(q) || (p.channel || '').toLowerCase().includes(q))
+      .slice(0, 6)
+      .map((p) => ({
+        key: `project-${p.id}`,
+        label: p.title,
+        hint: 'Project',
+        go: () => { setStudioProjectId(p.id); setActiveTab('repurpose'); setSearch(''); searchRef.current?.blur(); },
+      }));
+    return [...pages, ...projectHits].slice(0, 8);
+  }, [search, data?.projects]);
 
   const handleYoutubeLogin = async () => {
     if (!ytClientId || (!ytClientSecret && !savedSecrets.ytClientSecret)) {
@@ -240,7 +320,24 @@ export default function Dashboard() {
     window.location.href = '/api/auth/youtube';
   };
 
-  if (loading || authStatus === 'loading') {
+  if (authStatus === 'authenticated' && !data && loadError) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--background)', gap: '0.85rem', padding: '1.5rem', textAlign: 'center' }}>
+        <AlertTriangle size={26} color="var(--red)" />
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', maxWidth: 420 }}>{loadError}</p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-primary" onClick={() => fetchData()}>
+            <RefreshCw size={14} /> Try again
+          </button>
+          <button className="btn btn-secondary" onClick={() => signOut()}>
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'loading' || (authStatus === 'authenticated' && !data)) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--background)', gap: '0.75rem' }}>
         <RefreshCw className="animate-spin" size={28} color="var(--primary)" />
@@ -254,14 +351,21 @@ export default function Dashboard() {
   }
 
   const {
-    videos = [], 
     projects = [],
     totalClipsCount = 0,
-    stats = { totalGenerated: 0, successCount: 0, views: 0, engagement: 0, subs: 0, revenue: 0 }, 
-    settings = {} as SettingsData 
+    stats = { totalGenerated: 0, successCount: 0, views: 0, engagement: 0, subs: 0, revenue: 0 },
+    settings = {} as SettingsData,
+    autopilotScripts = [],
+    renderedClips = [],
+    renderWorkerConfigured = false,
   } = data || {};
 
   const pendingQueueCount = data?.approvalQueue?.length || 0;
+
+  const openProject = (projectId: string) => {
+    setStudioProjectId(projectId);
+    goToTab('repurpose');
+  };
 
   return (
     <div className="app-shell">
@@ -290,34 +394,74 @@ export default function Dashboard() {
 
           <span className="divider-v" />
 
-          {/* Workspace Switcher */}
-          <button type="button" className="btn btn-ghost" style={{ gap: '0.45rem', paddingLeft: '0.4rem', paddingRight: '0.5rem' }}>
-            <span style={{ width: '18px', height: '18px', borderRadius: '5px', background: 'var(--surface-3)', border: '1px solid var(--border-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.625rem', fontWeight: 700, color: 'var(--text-2)' }}>A</span>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 550, color: 'var(--text)' }}>Acme Media Studio</span>
-            <ChevronDown size={13} color="var(--text-3)" />
-          </button>
+          {/* Workspace (brand) name */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+            <span style={{ width: '18px', height: '18px', borderRadius: '5px', background: 'var(--surface-3)', border: '1px solid var(--border-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.625rem', fontWeight: 700, color: 'var(--text-2)', flexShrink: 0 }}>
+              {(settings.brandName || 'V')[0].toUpperCase()}
+            </span>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 550, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {settings.brandName || 'My workspace'}
+            </span>
+          </span>
         </div>
 
-        {/* Center Search */}
-        <div className="header-search">
+        {/* Center Search — jump to a page or project */}
+        <div className="header-search" style={{ position: 'relative' }}>
           <Search aria-hidden="true" />
           <input
+            ref={searchRef}
             type="text"
-            placeholder="Search or jump to…"
-            aria-label="Search projects, clips, or command"
+            placeholder="Jump to a page or project…"
+            aria-label="Jump to a page or project"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setSearchOpen(true); }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchResults[0]) {
+                searchResults[0].go();
+              } else if (e.key === 'Escape') {
+                setSearch('');
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
           />
           <kbd>⌘K</kbd>
+          {searchOpen && search.trim() && (
+            <div className="search-results" role="listbox">
+              {searchResults.length === 0 ? (
+                <p className="text-subtle" style={{ fontSize: '0.75rem', padding: '0.6rem 0.75rem' }}>No matches</p>
+              ) : (
+                searchResults.map((r) => (
+                  <button
+                    key={r.key}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    className="search-result"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={r.go}
+                  >
+                    <span>{r.label}</span>
+                    <span className="text-subtle" style={{ fontSize: '0.6875rem' }}>{r.hint}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span className="badge badge-neutral" style={{ gap: '0.4rem' }}>
-            <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} aria-hidden="true"></span>
-            Pipeline online
-          </span>
-
-          <button type="button" className="icon-btn" aria-label="Notifications">
-            <Bell size={16} />
+          <button
+            type="button"
+            className="badge badge-neutral"
+            style={{ gap: '0.4rem', cursor: 'pointer', border: 'none' }}
+            onClick={() => goToTab('settings')}
+            title={settings.hasAiKey ? `AI: ${settings.aiProvider}` : 'Add an AI key in Settings'}
+          >
+            <span className={settings.hasAiKey ? 'pulse-dot' : ''} style={{ width: 5, height: 5, borderRadius: '50%', background: settings.hasAiKey ? 'var(--green)' : 'var(--amber, #f59e0b)', display: 'inline-block' }} aria-hidden="true"></span>
+            {settings.hasAiKey ? 'AI connected' : 'AI key needed'}
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -434,12 +578,12 @@ export default function Dashboard() {
                 {activeTab === 'overview' && "Video repurposing, autonomous generation, and performance learning at a glance."}
                 {activeTab === 'repurpose' && "Turn long-form video into high-retention 9:16 shorts with automatic reframing and dynamic subtitles."}
                 {activeTab === 'autopilot' && "Scan trends and autonomously write a script, then send it to your Approval Queue for review."}
-                {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
+                {activeTab === 'queue' && "Review repurposed clips and autopilot scripts. Approving a clip renders the real video."}
                 {activeTab === 'learning-loop' && "Real performance of your published clips — watch-through, winning hook styles, and drop-offs."}
-                {activeTab === 'trends' && "Real-time Google Trends signals and back-catalog matching."}
-                {activeTab === 'agents' && "Multi-agent execution across highlight detection, editing, and distribution."}
+                {activeTab === 'trends' && "Every topic Autopilot has considered, with its AI viability verdict."}
+                {activeTab === 'agents' && "The AI agents behind the pipeline — and a console to ask any of them directly."}
                 {activeTab === 'settings' && "API keys, OAuth connections, and brand voice."}
-                {activeTab === 'content' && "Every rendered clip and autopilot video in one catalog."}
+                {activeTab === 'content' && "Every rendered clip and approved autopilot script in one place."}
               </p>
             </div>
 
@@ -471,7 +615,7 @@ export default function Dashboard() {
               <div className="grid-metrics">
                 {[
                   { label: 'Repurposed highlights', value: totalClipsCount, icon: Scissors, foot: 'Ranked by AI virality' },
-                  { label: 'Autopilot videos', value: videos.length, icon: Video, foot: 'Fully automated pipeline' },
+                  { label: 'Autopilot scripts', value: autopilotScripts.length, icon: FileText, foot: 'Written by Autopilot' },
                   { label: 'Avg. watch-through', value: stats.avgWatchThrough != null ? `${stats.avgWatchThrough}%` : '—', icon: TrendingUp, foot: stats.avgWatchThrough != null ? 'Across published clips' : 'No published metrics yet' },
                   { label: 'In review', value: pendingQueueCount, icon: ClipboardCheck, foot: 'Awaiting approval' },
                 ].map((m) => {
@@ -540,9 +684,9 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {projects.map((p: ProjectData) => {
-                        const topScore = p.clips && p.clips.length > 0 
-                          ? Math.max(...p.clips.map(c => c.viralityScore)) 
-                          : 94;
+                        const topScore = p.clips && p.clips.length > 0
+                          ? Math.max(...p.clips.map(c => c.viralityScore))
+                          : null;
 
                         return (
                           <tr key={p.id}>
@@ -552,15 +696,24 @@ export default function Dashboard() {
                                 {p.sourceType}
                               </span>
                             </td>
-                            <td>{p.clips?.length || 0} clips surfaced</td>
                             <td>
-                              <span className="badge badge-success" style={{ fontWeight: 700 }}>
-                                <Flame size={11} /> {topScore}/100
-                              </span>
+                              {p.status === 'transcribing' ? 'Transcribing…'
+                                : p.status === 'processing' ? 'Analyzing…'
+                                : p.status === 'failed' ? <span style={{ color: 'var(--red)' }}>Failed</span>
+                                : `${p.clips?.length || 0} clips surfaced`}
                             </td>
                             <td>
-                              <button onClick={() => setActiveTab('repurpose')} className="btn btn-secondary" style={{ fontSize: '0.6875rem', padding: '0.25rem 0.55rem' }}>
-                                Edit Clips
+                              {topScore != null ? (
+                                <span className="badge badge-success" style={{ fontWeight: 700 }}>
+                                  <Flame size={11} /> {topScore}/100
+                                </span>
+                              ) : (
+                                <span className="text-subtle">—</span>
+                              )}
+                            </td>
+                            <td>
+                              <button onClick={() => openProject(p.id)} className="btn btn-secondary" style={{ fontSize: '0.6875rem', padding: '0.25rem 0.55rem' }}>
+                                Open clips
                               </button>
                             </td>
                           </tr>
@@ -572,19 +725,19 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Autopilot Generations Table */}
+              {/* Recent Autopilot scripts */}
               <div className="panel">
                 <div className="panel-header">
-                  <span className="section-title">Recent autopilot videos</span>
+                  <span className="section-title">Recent autopilot scripts</span>
                   <button onClick={() => setActiveTab('autopilot')} className="btn btn-ghost btn-sm">
                     View all <ChevronRight />
                   </button>
                 </div>
 
-                {videos.length === 0 ? (
+                {autopilotScripts.length === 0 ? (
                   <div className="panel-empty">
                     <Sparkles style={{ width: 20, height: 20, margin: '0 auto 0.6rem', opacity: 0.5 }} />
-                    <p>No autopilot videos yet. Run the autopilot to generate your first short.</p>
+                    <p>No autopilot scripts yet. Run the autopilot to write your first one.</p>
                   </div>
                 ) : (
                   <div className="table-scroll">
@@ -594,23 +747,14 @@ export default function Dashboard() {
                         <th>Topic</th>
                         <th>Status</th>
                         <th>Date</th>
-                        <th>Engagement</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {videos.slice(0, 5).map((v: VideoData) => (
+                      {autopilotScripts.slice(0, 5).map((v) => (
                         <tr key={v.id}>
-                          <td style={{ fontWeight: 600 }}>{v.topic}</td>
-                          <td>
-                            <span className={`badge ${v.status === 'success' ? 'badge-success' : v.status === 'failed' ? 'badge-danger' : 'badge-warning'}`}>
-                              {v.status === 'success' ? <CheckCircle2 size={11} /> : v.status === 'failed' ? <XCircle size={11} /> : <Clock size={11} />}
-                              {v.status}
-                            </span>
-                          </td>
+                          <td style={{ fontWeight: 600 }}>{v.seoTitle || v.topic}</td>
+                          <td><ScriptStatusBadge status={v.status} /></td>
                           <td className="text-muted">{new Date(v.createdAt).toLocaleDateString()}</td>
-                          <td className="text-subtle" style={{ fontSize: '0.75rem' }}>
-                            {v.views || 0} views • {v.likes || 0} likes
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -625,7 +769,10 @@ export default function Dashboard() {
           {activeTab === 'repurpose' && (
             <RepurposeStudioView
               projects={projects}
-              onRefresh={() => fetchData()}
+              onRefresh={refresh}
+              selectedProjectId={studioProjectId}
+              onSelectProject={setStudioProjectId}
+              renderWorkerConfigured={renderWorkerConfigured}
               defaultPlatforms={defaultPlatforms}
               defaultOrientations={defaultOrientations}
               defaultCaptionStyle={captionStyle}
@@ -635,34 +782,37 @@ export default function Dashboard() {
           {/* AUTOPILOT GENERATOR TAB */}
           {activeTab === 'autopilot' && (
             <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
                 <div>
-                  <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Autopilot Trend Videos</h3>
-                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>AI-written scripts sent to your Approval Queue for review — video rendering isn&apos;t built for autopilot content yet.</p>
+                  <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Autopilot scripts</h3>
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }}>Each run picks a trending topic for your niche and writes a script, hook and SEO metadata, then sends it to the Approval Queue. Turning scripts into videos isn&apos;t built yet.</p>
                 </div>
-                <span className="badge badge-neutral">{videos.length} Videos</span>
+                <span className="badge badge-neutral">{autopilotScripts.length} scripts</span>
               </div>
 
-              {videos.length === 0 ? (
+              {autopilotScripts.length === 0 ? (
                 <div style={{ padding: '3.5rem', textAlign: 'center' }}>
-                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No videos in the library yet. Click &quot;Run Autopilot&quot; to begin.</p>
+                  <p className="text-muted" style={{ fontSize: '0.8125rem' }}>No scripts yet. Click &quot;Run Autopilot&quot; to write one.</p>
                 </div>
               ) : (
                 <div className="grid-cols-3" style={{ padding: '1.25rem' }}>
-                  {videos.map((v: VideoData) => (
-                    <div key={v.id} className="panel-card panel-card-interactive" style={{ padding: 0, overflow: 'hidden' }}>
-                      <div style={{ height: '140px', background: 'radial-gradient(circle at center, #1e1b4b 0%, #09090b 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--surface-border)', position: 'relative' }}>
-                        <Video size={32} color="var(--primary)" />
-                        <span style={{ position: 'absolute', top: 10, right: 10 }} className={`badge ${v.status === 'success' ? 'badge-success' : 'badge-warning'}`}>
-                          {v.status}
-                        </span>
+                  {autopilotScripts.map((v) => (
+                    <div key={v.id} className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'flex-start' }}>
+                        <h4 style={{ fontSize: '0.8125rem', fontWeight: 700, lineHeight: 1.35 }}>{v.seoTitle || v.topic}</h4>
+                        <ScriptStatusBadge status={v.status} />
                       </div>
-                      <div style={{ padding: '0.85rem' }}>
-                        <h4 style={{ fontSize: '0.8125rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.topic}</h4>
-                        <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>
-                          {new Date(v.createdAt).toLocaleDateString()} • {v.views || 0} views
-                        </p>
-                      </div>
+                      <p className="text-muted" style={{ fontSize: '0.75rem', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {v.script}
+                      </p>
+                      <p className="text-subtle" style={{ fontSize: '0.7rem', marginTop: 'auto' }}>
+                        {v.topic} · {new Date(v.createdAt).toLocaleDateString()}
+                      </p>
+                      {v.status === 'pending' && (
+                        <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => goToTab('queue')}>
+                          Review in queue <ChevronRight />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -672,22 +822,16 @@ export default function Dashboard() {
 
           {/* APPROVAL QUEUE TAB */}
           {activeTab === 'queue' && (
-            <ApprovalQueueView items={data?.approvalQueue || []} onRefresh={() => fetchData()} />
+            <ApprovalQueueView items={data?.approvalQueue || []} onRefresh={refresh} />
           )}
 
           {/* CONTENT LIBRARY TAB */}
           {activeTab === 'content' && (
-            <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--surface-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '0.9375rem', fontWeight: 700 }}>Unified Content Catalog</h3>
-                <span className="badge badge-neutral">{videos.length + totalClipsCount} Total Assets</span>
-              </div>
-              <div style={{ padding: '1.5rem', textAlign: 'center' }}>
-                <p className="text-muted" style={{ fontSize: '0.8125rem' }}>
-                  All rendered clips and autopilot videos are cataloged in your workspace. Select any asset in the Repurpose Studio to preview or download.
-                </p>
-              </div>
-            </div>
+            <ContentLibraryView
+              renderedClips={renderedClips}
+              autopilotScripts={autopilotScripts}
+              onOpenProject={openProject}
+            />
           )}
 
           {/* LEARNING LOOP TAB */}
@@ -750,6 +894,11 @@ export default function Dashboard() {
                       />
                     </div>
                   </div>
+                  {settings.aiKeySource === 'env' && (
+                    <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.75rem' }}>
+                      Using the {settings.aiProvider} key from the server environment. Paste a key above to use a different provider.
+                    </p>
+                  )}
                   <p className="text-subtle" style={{ fontSize: '0.75rem', marginTop: '0.75rem' }}>
                     Get a free key:{' '}
                     {aiProvider === 'gemini' && <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-bright)' }}>aistudio.google.com/apikey</a>}
@@ -859,6 +1008,9 @@ export default function Dashboard() {
                         <label className="form-label">Page Access Token</label>
                         <input type="password" value={igAccessToken} onChange={(e) => setIgAccessToken(e.target.value)} placeholder={savedSecrets.igToken ? '•••••••• (saved — leave blank to keep)' : 'EAA...'} className="input-field" />
                       </div>
+                      <p className="text-subtle" style={{ fontSize: '0.72rem' }}>
+                        Saved for auto-publishing, which isn&apos;t built yet — download rendered clips from the Content Library to post them.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -888,7 +1040,10 @@ export default function Dashboard() {
                   </div>
 
                   <div className="panel-card">
-                    <h3 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.75rem' }}>Media Assets & Voice</h3>
+                    <h3 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.35rem' }}>Media Assets & Voice</h3>
+                    <p className="text-subtle" style={{ fontSize: '0.72rem', marginBottom: '0.75rem' }}>
+                      Only the subtitle style is used today (for rendered clips). The keys and video style are saved for the upcoming script-to-video pipeline.
+                    </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       <div className="form-group">
                         <label className="form-label">ElevenLabs API Key (Hyper-Realistic TTS)</label>

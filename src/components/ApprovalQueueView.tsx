@@ -1,52 +1,67 @@
-import React, { useState } from 'react';
-import { CheckCircle, XCircle, FileText, Video, Tag, Clock, Layers } from 'lucide-react';
-import toast from 'react-hot-toast';
+"use client";
 
-interface ApprovalItem {
-  id: string;
-  topic: string;
-  script: string;
-  visualPrompts: string;
-  captions: string;
-  seoTitle?: string;
-  seoDescription?: string;
-  seoTags?: string;
-  createdAt: string;
-}
+import React, { useState } from 'react';
+import { CheckCircle, XCircle, FileText, Video, Tag, Clock, Layers, RefreshCw } from 'lucide-react';
+import toast from 'react-hot-toast';
+import type { ApprovalQueueItem } from '@/types';
+import { waitForRender } from '@/lib/renderClient';
 
 interface Props {
-  items: ApprovalItem[];
+  items: ApprovalQueueItem[];
   onRefresh: () => void;
+}
+
+type Scene = string | { spokenText?: string; bRollPrompt?: string; durationEstimate?: number };
+
+function safeParseArray<T>(str: string | null | undefined): T[] {
+  try {
+    const parsed = JSON.parse(str || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
   const [activeViewTab, setActiveViewTab] = useState<Record<string, 'script' | 'scenes' | 'seo'>>({});
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
 
-  const handleAction = async (id: string, action: 'approve' | 'reject') => {
-    toast.loading(`${action === 'approve' ? 'Approving' : 'Rejecting'} content...`, { id: 'approval' });
+  const handleAction = async (item: ApprovalQueueItem, action: 'approve' | 'reject') => {
+    if (busy[item.id]) return;
+    setBusy((b) => ({ ...b, [item.id]: true }));
+    const toastId = `approval-${item.id}`;
+    toast.loading(`${action === 'approve' ? 'Approving' : 'Rejecting'}…`, { id: toastId });
     try {
       const res = await fetch('/api/approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action })
+        body: JSON.stringify({ id: item.id, action }),
       });
       const data = await res.json();
-      if (data.success) {
-        toast.success(data.message || (action === 'approve' ? 'Approved!' : 'Rejected!'), { id: 'approval', duration: 6000 });
-        onRefresh();
-      } else {
-        toast.error(data.error || 'Failed to process approval.', { id: 'approval', duration: 7000 });
+      if (!data.success) {
+        toast.error(data.error || 'Failed to process approval.', { id: toastId, duration: 7000 });
+        return;
       }
-    } catch (e) {
-      toast.error('Network error processing approval.', { id: 'approval' });
-    }
-  };
+      onRefresh();
 
-  const safeParseJSON = (str: string, fallback: any = []) => {
-    try {
-      return JSON.parse(str);
-    } catch (e) {
-      return fallback;
+      // Approved clip: the render runs in the background on the worker —
+      // follow it so the user hears when the video is ready.
+      if (data.render?.jobId) {
+        toast.loading(`Approved — rendering "${item.topic.replace(/^\[Repurposed\]\s*/, '')}". This can take a few minutes…`, { id: toastId });
+        const result = await waitForRender(data.render.clipId, data.render.jobId);
+        if (result.ok) {
+          toast.success('Rendered — find it in the Content Library.', { id: toastId, duration: 6000 });
+        } else {
+          toast.error(`Approved, but rendering failed: ${result.error}`, { id: toastId, duration: 9000 });
+        }
+        onRefresh();
+        return;
+      }
+      toast.success(data.message || (action === 'approve' ? 'Approved!' : 'Rejected!'), { id: toastId, duration: 6000 });
+    } catch {
+      toast.error('Network error processing approval.', { id: toastId });
+    } finally {
+      setBusy((b) => ({ ...b, [item.id]: false }));
     }
   };
 
@@ -75,9 +90,10 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
           </div>
         ) : (
           items.map((item) => {
-            const scenes = safeParseJSON(item.visualPrompts, []);
-            const tags = safeParseJSON(item.seoTags || '[]', []);
+            const scenes = safeParseArray<Scene>(item.visualPrompts);
+            const tags = safeParseArray<string>(item.seoTags);
             const currentTab = activeViewTab[item.id] || 'script';
+            const isBusy = Boolean(busy[item.id]);
 
             return (
               <div key={item.id} className="panel-card">
@@ -87,6 +103,9 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
                       <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>{item.topic}</h3>
                       <span className="badge badge-warning">Needs Approval</span>
+                      {item.renderStatus === 'failed' && (
+                        <span className="badge badge-danger" title={item.renderError || undefined}>Last render failed</span>
+                      )}
                     </div>
                     <p className="text-subtle" style={{ fontSize: '0.775rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <Clock size={12} /> Generated {new Date(item.createdAt).toLocaleString()}
@@ -94,11 +113,12 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
                   </div>
 
                   <div style={{ display: 'flex', gap: '0.6rem' }}>
-                    <button onClick={() => handleAction(item.id, 'reject')} className="btn btn-danger">
+                    <button onClick={() => handleAction(item, 'reject')} className="btn btn-danger" disabled={isBusy}>
                       <XCircle size={15} /> Reject
                     </button>
-                    <button onClick={() => handleAction(item.id, 'approve')} className="btn btn-primary">
-                      <CheckCircle size={15} /> Approve & Render
+                    <button onClick={() => handleAction(item, 'approve')} className="btn btn-primary" disabled={isBusy}>
+                      {isBusy ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle size={15} />}
+                      {item.clipId ? 'Approve & Render' : 'Approve'}
                     </button>
                   </div>
                 </div>
@@ -141,16 +161,20 @@ export const ApprovalQueueView: React.FC<Props> = ({ items, onRefresh }) => {
 
                 {currentTab === 'scenes' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                    {scenes.map((scene: any, i: number) => (
-                      <div key={i} style={{ background: 'var(--background)', padding: '0.9rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--surface-border)', fontSize: '0.825rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                          <span style={{ fontWeight: 700, color: 'var(--primary)' }}>Scene #{i + 1}</span>
-                          {scene.durationEstimate && <span className="text-subtle">{scene.durationEstimate}s</span>}
+                    {scenes.length === 0 && <p className="text-subtle" style={{ fontSize: '0.8125rem' }}>No scene breakdown for this item.</p>}
+                    {scenes.map((scene, i) => {
+                      const sc = typeof scene === 'string' ? { spokenText: scene } : scene || {};
+                      return (
+                        <div key={i} style={{ background: 'var(--background)', padding: '0.9rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--surface-border)', fontSize: '0.825rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>Scene #{i + 1}</span>
+                            {sc.durationEstimate ? <span className="text-subtle">{sc.durationEstimate}s</span> : null}
+                          </div>
+                          {sc.spokenText && <p style={{ color: 'var(--foreground)', marginBottom: '0.25rem' }}><strong>{typeof scene === 'string' ? 'Note:' : 'Audio:'}</strong> {sc.spokenText}</p>}
+                          {sc.bRollPrompt && <p className="text-muted"><strong>Visual B-Roll:</strong> {sc.bRollPrompt}</p>}
                         </div>
-                        <p style={{ color: 'var(--foreground)', marginBottom: '0.25rem' }}><strong>Audio:</strong> {scene.spokenText || scene}</p>
-                        {scene.bRollPrompt && <p className="text-muted"><strong>Visual B-Roll:</strong> {scene.bRollPrompt}</p>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 

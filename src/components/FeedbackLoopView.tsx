@@ -113,33 +113,44 @@ function SampleWeights({ weights }: { weights: NonNullable<FeedbackLoopData['mod
   );
 }
 
+async function fetchReport(): Promise<FeedbackLoopData | null> {
+  try {
+    const res = await fetch('/api/analytics/loop');
+    const json = await res.json();
+    return json.success ? json.report : null;
+  } catch (e) {
+    console.error(e);
+    toast.error('Could not load Learning Loop data.');
+    return null;
+  }
+}
+
 export function FeedbackLoopView() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [feedbackData, setFeedbackData] = useState<FeedbackLoopData | null>(null);
 
-  const fetchLoopData = async () => {
-    try {
-      setLoading(true);
-      setFailed(false);
-      const res = await fetch('/api/analytics/loop');
-      const json = await res.json();
-      if (json.success) {
-        setFeedbackData(json.report);
-      } else {
-        setFailed(true);
-      }
-    } catch (e) {
-      console.error(e);
-      setFailed(true);
-      toast.error('Could not load Learning Loop data.');
-    } finally {
-      setLoading(false);
-    }
+  const applyReport = (report: FeedbackLoopData | null) => {
+    setFeedbackData(report);
+    setFailed(!report);
+    setLoading(false);
   };
 
+  const fetchLoopData = async () => {
+    setLoading(true);
+    setFailed(false);
+    applyReport(await fetchReport());
+  };
+
+  // Initial load — `loading` already starts true.
   useEffect(() => {
-    fetchLoopData();
+    let cancelled = false;
+    fetchReport().then((report) => {
+      if (!cancelled) applyReport(report);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (loading) {

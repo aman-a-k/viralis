@@ -1,26 +1,52 @@
+"use client";
+
 import React, { useState } from 'react';
 import { AgentStatus } from '@/types';
-import { Cpu, Terminal, Play, CheckCircle, AlertTriangle, RefreshCw, Send, Check } from 'lucide-react';
+import { Cpu, Terminal, AlertTriangle, RefreshCw, Send, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Props {
   agents: AgentStatus[];
 }
 
+interface Exchange {
+  id: number;
+  agent: string;
+  prompt: string;
+  reply: string;
+}
+
 export const AgentStatusView: React.FC<Props> = ({ agents }) => {
   const [command, setCommand] = useState('');
+  const [agentId, setAgentId] = useState(agents[0]?.id || 'copy-agent');
+  const [sending, setSending] = useState(false);
+  const [history, setHistory] = useState<Exchange[]>([]);
 
-  const handleSendCommand = (e: React.FormEvent) => {
+  // Sends a one-off instruction to the chosen agent's persona (brand-aware)
+  // and shows its reply. It advises — it doesn't trigger pipeline runs.
+  const handleSendCommand = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!command.trim()) return;
-    // There's no backend for arbitrary natural-language agent commands —
-    // the real agents only run through the fixed "Run Autopilot" workflow
-    // (Repurpose Studio / Autopilot Generator). Say so rather than faking
-    // a dispatch that nothing receives.
-    toast('Free-form agent dispatch isn’t built yet — use Run Autopilot or Repurpose Studio to trigger the real pipeline.', {
-      icon: 'ℹ️',
-      duration: 6000,
-    });
+    const prompt = command.trim();
+    if (!prompt || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch('/api/agents/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, prompt }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        toast.error(data.error || 'The agent could not answer.', { duration: 7000 });
+        return;
+      }
+      setHistory((h) => [{ id: Date.now(), agent: data.agent, prompt, reply: data.reply }, ...h].slice(0, 10));
+      setCommand('');
+    } catch {
+      toast.error('Network error contacting the agent.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -34,12 +60,11 @@ export const AgentStatusView: React.FC<Props> = ({ agents }) => {
               <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>AI Agent Orchestration Mesh</h2>
             </div>
             <p className="text-muted" style={{ fontSize: '0.85rem' }}>
-              Autonomous sub-agents handling trend discovery, scriptwriting, video compilation, and distribution.
+              Specialized AI agents behind highlight detection, rendering, copywriting, trend research and performance analysis.
             </p>
           </div>
-          <span className="badge badge-success" style={{ padding: '0.4rem 0.85rem' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
-            5 Agents Active & Operational
+          <span className="badge badge-neutral" style={{ padding: '0.4rem 0.85rem' }}>
+            {agents.length} agents
           </span>
         </div>
       </div>
@@ -103,24 +128,40 @@ export const AgentStatusView: React.FC<Props> = ({ agents }) => {
 
       {/* Terminal Dispatch Form */}
       <div className="panel-card">
-        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.35rem' }}>Agent Terminal Dispatch</h3>
+        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.35rem' }}>Ask an agent</h3>
         <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-          Issue manual instructions or direct prompts to specific agents in the cluster.
+          Get advice from a specific agent — hooks, captions, trend angles, edit ideas. Answers use your brand settings. (This doesn&apos;t start pipeline runs; use Repurpose Studio or Run Autopilot for that.)
         </p>
 
-        <form onSubmit={handleSendCommand} style={{ display: 'flex', gap: '0.75rem' }}>
-          <input 
-            type="text" 
+        <form onSubmit={handleSendCommand} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <select className="input-field" style={{ width: 220 }} value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label="Agent">
+            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <input
+            type="text"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder="e.g., 'TrendAgent, research top trending topics in AI software'"
-            className="input-field" 
-            style={{ flex: 1 }}
+            placeholder="e.g. 'Write three hook lines for a clip about pricing mistakes'"
+            className="input-field"
+            style={{ flex: '1 1 280px' }}
           />
-          <button type="submit" className="btn btn-primary">
-            <Send size={15} /> Dispatch
+          <button type="submit" className="btn btn-primary" disabled={sending || !command.trim()}>
+            {sending ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />} {sending ? 'Asking…' : 'Send'}
           </button>
         </form>
+
+        {history.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.25rem' }}>
+            {history.map((x) => (
+              <div key={x.id} style={{ background: 'var(--background)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--surface-border)' }}>
+                <p className="text-subtle" style={{ fontSize: '0.72rem', marginBottom: '0.4rem' }}>
+                  You → {x.agent}: {x.prompt}
+                </p>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--foreground)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{x.reply}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

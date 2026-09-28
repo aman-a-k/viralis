@@ -1,28 +1,21 @@
 import React from 'react';
-import { TrendingUp, Calendar, Zap, MessageSquare } from 'lucide-react';
-
-interface TrendRecord {
-  id: string;
-  topic: string;
-  score: number;
-  keywords: string;
-  isViable: boolean;
-  analysis: string | null;
-  createdAt: string;
-}
+import { TrendingUp, Calendar, MessageSquare } from 'lucide-react';
+import type { TrendRecord } from '@/types';
 
 interface Props {
   trends: TrendRecord[];
 }
 
+function parseKeywords(str: string): string[] {
+  try {
+    const parsed = JSON.parse(str);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
-  const safeParseJSON = (str: string, fallback: any = []) => {
-    try {
-      return JSON.parse(str);
-    } catch (e) {
-      return fallback;
-    }
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -30,7 +23,7 @@ export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
         <div>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.25rem' }}>Trend Intelligence Log</h2>
           <p className="text-muted" style={{ fontSize: '0.85rem' }}>
-            Historical record of viral search spikes and AI viability analysis.
+            Topics Autopilot has picked (from Google Trends when reachable) and the AI&apos;s verdict on each.
           </p>
         </div>
         <span className="badge badge-neutral" style={{ padding: '0.4rem 0.85rem' }}>
@@ -44,12 +37,12 @@ export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
             <TrendingUp size={32} color="var(--foreground-subtle)" style={{ marginBottom: '0.75rem' }} />
             <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.35rem' }}>No Trends Recorded</h3>
             <p className="text-muted" style={{ fontSize: '0.85rem' }}>
-              Run the automated workflow cycle to fetch and evaluate current Google Trends.
+              Click &quot;Run Autopilot&quot; to pick and evaluate a trending topic for your niche.
             </p>
           </div>
         ) : (
           trends.map((trend) => {
-            const keywords = safeParseJSON(trend.keywords, []);
+            const keywords = parseKeywords(trend.keywords);
 
             return (
               <div key={trend.id} className="panel-card">

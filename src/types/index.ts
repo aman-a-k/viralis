@@ -26,6 +26,17 @@ export interface GeneratedContent {
 export interface SettingsData {
   youtubeId: string;
   instagramId: string;
+  brandName: string;
+  brandTone: string;
+  brandNiche: string;
+  targetAudience: string;
+  videoStyle: string;
+  captionStyle: string;
+  aiProvider: 'openai' | 'gemini' | 'groq';
+  aiModel: string;
+  hasAiKey: boolean;
+  /** Where the active AI key comes from: saved in Settings, or the server env. */
+  aiKeySource: 'settings' | 'env' | null;
   hasOpenAi: boolean;
   youtubeClientId: string;
   hasYoutubeClientSecret: boolean;
@@ -34,6 +45,52 @@ export interface SettingsData {
   hasDiscordWebhook: boolean;
   hasPexelsKey: boolean;
   hasElevenLabsKey: boolean;
+  hasYoutubeDataKey: boolean;
+  defaultPlatforms: string[];
+  defaultOrientations: string[];
+}
+
+export interface ApprovalQueueItem {
+  id: string;
+  topic: string;
+  script: string;
+  visualPrompts: string;
+  captions: string;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  seoTags?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string | null;
+  clipId?: string | null;
+  renderStatus?: string | null;
+  renderError?: string | null;
+  createdAt: string;
+}
+
+export interface TrendRecord {
+  id: string;
+  topic: string;
+  score: number;
+  keywords: string;
+  isViable: boolean;
+  analysis: string | null;
+  createdAt: string;
+}
+
+/** A clip with a real rendered file, for the Content Library. */
+export interface RenderedClipData {
+  id: string;
+  projectId: string;
+  title: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  viralityScore: number;
+  hookType?: string | null;
+  videoUrl: string;
+  status: string;
+  createdAt: string;
+  project: { title: string; thumbnail?: string | null };
 }
 
 export interface VideoData {
