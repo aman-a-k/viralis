@@ -1,39 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Viralis
 
-## Getting Started
+Turns long-form YouTube videos (or pasted transcripts) into short-form clips:
+AI picks the strongest moments, writes captions for each platform, and — with
+the render worker connected — cuts real 9:16 / 1:1 / 16:9 videos with
+burned-in subtitles. Autopilot writes scripts for trending topics in your niche.
 
-First, run the development server:
+## What works, and what it needs
+
+| Feature | Needs |
+| --- | --- |
+| Repurpose Studio — analyze a YouTube link or pasted transcript | An AI key (Gemini / Groq / OpenAI) |
+| Browse trending / Automatic mode | AI key + YouTube Data API key |
+| Render clips to video files, Content Library | [Render worker](worker/README.md) + Vercel Blob |
+| Transcribing videos YouTube won't serve captions for | Render worker |
+| Autopilot scripts, Trend Radar | AI key |
+| Agent Fleet "Ask an agent" | AI key |
+| Approval Queue, Discord alerts | Discord webhook (optional) |
+| Learning Loop | Shows sample data until clips have performance metrics — publishing and metric import aren't built yet |
+
+Keys can be set in **Settings** inside the app or as environment variables
+(see `.env.example`). A key saved in Settings wins over the environment.
+
+## Local setup
 
 ```bash
+cp .env.example .env        # fill in DATABASE_URL, DIRECT_URL, NEXTAUTH_SECRET, and one AI key
+npm install
+npx prisma migrate deploy   # create the tables
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. In development a **Developer bypass** sign-in is
+available; otherwise create the first account with email + password (sign-up
+is then closed unless `ALLOWED_EMAILS` lists more people).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploying
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **App**: Vercel (or `docker compose up` with a filled-in `.env`). Run
+  `npx prisma migrate deploy` against the production database whenever
+  `prisma/migrations` changes.
+- **Render worker**: separate service — see [worker/README.md](worker/README.md).
+  Then set `RENDER_WORKER_URL` and `RENDER_WORKER_SECRET` on the app.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
 ## Development notes
 

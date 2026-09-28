@@ -6,9 +6,9 @@ services:
     container_name: ai_automator_prod
     ports:
       - "3000:3000"
-    volumes:
-      - ./dev.db:/app/dev.db
-      - ./public/renders:/app/public/renders
+    # DATABASE_URL (Postgres), NEXTAUTH_SECRET, NEXTAUTH_URL, AI keys, etc.
+    # — see .env.example.
+    env_file: .env
     restart: always
     environment:
       - NODE_ENV=production
