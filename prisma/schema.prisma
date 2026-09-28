@@ -9,100 +9,107 @@ datasource db {
 }
 
 model Video {
-  id          String   @id @default(cuid())
-  topic       String
-  videoUrl    String
-  views       Int      @default(0)
-  likes       Int      @default(0)
-  platform    String   // "youtube", "instagram", "both"
-  status      String   // "success", "failed", "pending"
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  topic     String
+  videoUrl  String
+  views     Int      @default(0)
+  likes     Int      @default(0)
+  platform  String // "youtube", "instagram", "both"
+  status    String // "success", "failed", "pending"
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model ApprovalQueue {
   id              String   @id @default(cuid())
   topic           String
   script          String
-  visualPrompts   String   // JSON
-  captions        String   // JSON
+  visualPrompts   String // JSON
+  captions        String // JSON
   seoTitle        String?
   seoDescription  String?
-  seoTags         String?  // JSON
+  seoTags         String? // JSON
   status          String   @default("pending") // "pending", "approved", "rejected"
   rejectionReason String?
   createdAt       DateTime @default(now())
 
   // Links back to the repurposed Clip this entry came from (unset for
   // Autopilot-generated scripts, which have no source clip to cut).
-  clipId          String?
-  renderStatus    String?  // null | "pending" | "rendering" | "rendered" | "failed"
-  renderError     String?
+  clipId       String?
+  renderStatus String? // null | "pending" | "rendering" | "rendered" | "failed"
+  renderError  String?
+
+  @@index([status, createdAt])
+  @@index([clipId])
 }
 
 model Trend {
-  id          String   @id @default(cuid())
-  topic       String
-  score       Int
-  keywords    String   // JSON stringified array
-  isViable    Boolean  @default(true)
-  analysis    String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  topic     String
+  score     Int
+  keywords  String // JSON stringified array
+  isViable  Boolean  @default(true)
+  analysis  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model Analytics {
-  id              String   @id @default(cuid())
-  totalViews      Int      @default(0)
-  totalRevenue    Float    @default(0.0)
-  engagementRate  Float    @default(0.0)
-  subscribersGained Int    @default(0)
-  lastUpdated     DateTime @default(now())
+  id                String   @id @default(cuid())
+  totalViews        Int      @default(0)
+  totalRevenue      Float    @default(0.0)
+  engagementRate    Float    @default(0.0)
+  subscribersGained Int      @default(0)
+  lastUpdated       DateTime @default(now())
 }
 
 model Settings {
-  id                    String   @id @default("default")
-  youtubeId             String?
-  instagramId           String?
-  openAiKey             String?   // legacy — see aiApiKey
+  id          String  @id @default("default")
+  youtubeId   String?
+  instagramId String?
+  openAiKey   String? // legacy — see aiApiKey
 
   // AI provider (OpenAI-compatible). provider: "openai" | "gemini" | "groq"
-  aiProvider            String?   @default("gemini")
-  aiApiKey              String?
-  aiModel               String?
-  
+  aiProvider String? @default("gemini")
+  aiApiKey   String?
+  aiModel    String?
+
   // YouTube OAuth
-  youtubeClientId       String?
-  youtubeClientSecret   String?
-  youtubeRefreshToken   String?
+  youtubeClientId     String?
+  youtubeClientSecret String?
+  youtubeRefreshToken String?
 
   // YouTube Data API (trending discovery — separate from the OAuth upload creds above)
-  youtubeDataApiKey     String?
+  youtubeDataApiKey String?
 
   // Repurpose defaults (JSON string arrays)
-  defaultPlatforms      String?   @default("[\"instagram\",\"youtube\",\"linkedin\",\"twitter\",\"tiktok\"]")
-  defaultOrientations   String?   @default("[\"9:16\",\"1:1\",\"16:9\"]")
+  defaultPlatforms    String? @default("[\"instagram\",\"youtube\",\"linkedin\",\"twitter\",\"tiktok\"]")
+  defaultOrientations String? @default("[\"9:16\",\"1:1\",\"16:9\"]")
 
   // Instagram Graph API
-  instagramAccessToken  String?
+  instagramAccessToken String?
 
   // Brand Identity
-  brandName             String?   @default("Viralis")
-  brandNiche            String?   @default("Technology & AI")
-  brandTone             String?   @default("Punchy & Viral")
-  targetAudience        String?   @default("Social Media Audience")
-  defaultHashtags       String?   @default("viral,shorts,trending,growth")
-  
+  brandName       String? @default("Viralis")
+  brandNiche      String? @default("Technology & AI")
+  brandTone       String? @default("Punchy & Viral")
+  targetAudience  String? @default("Social Media Audience")
+  defaultHashtags String? @default("viral,shorts,trending,growth")
+
   // Notification Hooks
-  discordWebhookUrl     String?
+  discordWebhookUrl String?
 
   // Visual Assets & Voice (Pro Tier)
-  pexelsApiKey          String?
-  pixabayApiKey         String?
-  elevenLabsApiKey      String?
+  pexelsApiKey     String?
+  pixabayApiKey    String?
+  elevenLabsApiKey String?
 
   // Video Generation Preferences
-  videoStyle            String?   @default("Cinematic Stock") // "Cinematic Stock", "AI Art Transitions"
-  captionStyle          String?   @default("Dynamic Pop")     // "Dynamic Pop" (Hormozi style), "Minimalist"
-  backgroundMusic       String?   @default("Trending Beats")
+  videoStyle      String? @default("Cinematic Stock") // "Cinematic Stock", "AI Art Transitions"
+  captionStyle    String? @default("Dynamic Pop") // "Dynamic Pop" (Hormozi style), "Minimalist"
+  backgroundMusic String? @default("Trending Beats")
 }
 
 // Viralis Core Models (Repurposing & Self-Optimizing Distribution)
@@ -110,53 +117,62 @@ model Project {
   id              String   @id @default(cuid())
   title           String
   sourceVideoUrl  String?
-  sourceVideoId   String?  // YouTube video id when sourceType == "youtube"
+  sourceVideoId   String? // YouTube video id when sourceType == "youtube"
   sourceType      String   @default("upload") // "upload", "youtube", "drive", "zoom"
   channel         String?
   thumbnail       String?
-  transcript      String?  // Full caption transcript text
-  transcriptJson  String?  // JSON array of { text, start, end }
+  transcript      String? // Full caption transcript text
+  transcriptJson  String? // JSON array of { text, start, end }
   duration        Float?   @default(0)
-  status          String   @default("ready")  // "processing", "transcribing", "ready", "failed"
+  status          String   @default("ready") // "processing", "transcribing", "ready", "failed"
   errorMessage    String?
-  transcriptJobId String?  // worker job id while status == "transcribing"
-  metadata        String?  // JSON string
+  transcriptJobId String? // worker job id while status == "transcribing"
+  metadata        String? // JSON string
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   clips           Clip[]
+
+  @@index([createdAt])
+  @@index([status])
 }
 
 model Clip {
-  id                String   @id @default(cuid())
+  id                String     @id @default(cuid())
   projectId         String
-  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project           Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title             String
   startTime         Float
   endTime           Float
   duration          Float
-  viralityScore     Int      @default(85)
+  viralityScore     Int        @default(85)
   reasoning         String
   hookType          String?
-  aspectRatios      String   @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
+  aspectRatios      String     @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
   transcriptSegment String
-  captionVersions   String   // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
+  captionVersions   String // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
   videoUrl          String?
-  status            String   @default("candidate") // "candidate", "approved", "scheduled", "published", "rejected"
-  createdAt         DateTime @default(now())
+  status            String     @default("candidate") // "candidate", "approved", "scheduled", "published", "rejected"
+  createdAt         DateTime   @default(now())
   schedules         Schedule[]
   metrics           Metric[]
+
+  @@index([projectId])
+  @@index([status])
 }
 
 model Schedule {
   id            String    @id @default(cuid())
   clipId        String?
   clip          Clip?     @relation(fields: [clipId], references: [id], onDelete: Cascade)
-  platform      String    // "instagram", "youtube", "linkedin", "twitter", "tiktok"
+  platform      String // "instagram", "youtube", "linkedin", "twitter", "tiktok"
   scheduledTime DateTime
   publishedTime DateTime?
   status        String    @default("pending") // "pending", "published", "failed"
   postId        String?
   createdAt     DateTime  @default(now())
+
+  @@index([clipId])
+  @@index([status])
 }
 
 model Metric {
@@ -170,8 +186,11 @@ model Metric {
   comments        Int      @default(0)
   saves           Int      @default(0)
   watchThroughPct Float    @default(0.0)
-  rootCauseTag    String?  // e.g. "hook too slow", "wrong platform fit", "topic saturation"
+  rootCauseTag    String? // e.g. "hook too slow", "wrong platform fit", "topic saturation"
   fetchedAt       DateTime @default(now())
+
+  @@index([clipId])
+  @@index([fetchedAt])
 }
 
 model TrendSignal {
@@ -179,28 +198,29 @@ model TrendSignal {
   niche         String
   topic         String
   trendingScore Int      @default(80)
-  format        String?  // e.g. "contrarian debate", "breakdown", "hook question"
+  format        String? // e.g. "contrarian debate", "breakdown", "hook question"
   detectedAt    DateTime @default(now())
 }
 
 // NextAuth Models
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String?
-  access_token       String?
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String?
-  session_state      String?
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Session {
@@ -209,6 +229,8 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model User {
