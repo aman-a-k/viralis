@@ -3,27 +3,27 @@ import { requireSession } from '@/lib/apiAuth';
 import { RepurposingService } from '@/services/repurposingService';
 import { RenderWorkerNotConfiguredError } from '@/lib/renderWorker';
 
-// Downloading + cutting + uploading can take a while; allow up to the
-// Hobby-plan max.
+// Starting a job is quick, but a cold (spun-down) worker can take ~30-60s to
+// answer the first request.
 export const maxDuration = 60;
 
+/**
+ * Starts rendering a clip on the worker. Returns { status: 'rendering', jobId }
+ * — poll /api/repurpose/render/status — or { status: 'done', videoUrl } when
+ * the worker finished synchronously.
+ */
 export async function POST(req: Request) {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const { clipId, aspectRatio = '9:16', captionStyle = 'Dynamic Pop' } = await req.json();
+    const { clipId, aspectRatio, captionStyle } = await req.json();
     if (!clipId) {
       return NextResponse.json({ success: false, error: 'clipId is required' }, { status: 400 });
     }
 
-    const videoUrl = await RepurposingService.renderClip(clipId, aspectRatio, captionStyle);
-
-    return NextResponse.json({
-      success: true,
-      videoUrl,
-      message: `Rendered a real ${aspectRatio} cut with burned-in captions.`,
-    });
+    const result = await RepurposingService.startRender(clipId, aspectRatio, captionStyle);
+    return NextResponse.json({ success: true, ...result });
   } catch (error: unknown) {
     const status = error instanceof RenderWorkerNotConfiguredError ? 424 : 500;
     return NextResponse.json(

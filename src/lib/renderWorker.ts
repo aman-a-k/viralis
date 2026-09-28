@@ -40,6 +40,57 @@ export class RenderWorkerNotConfiguredError extends Error {
   }
 }
 
+export type RenderJobStatus =
+  | { status: 'processing' }
+  | { status: 'done'; videoUrl: string; clipId?: string }
+  | { status: 'error'; error: string };
+
+/**
+ * Starts a render as a background job on the worker. Downloading + cutting +
+ * re-encoding at 1080p takes minutes on a free-tier CPU — far past what one
+ * serverless request can wait on — so callers poll getRenderJobStatus.
+ *
+ * A worker deployed before /render/start existed answers 404; in that case
+ * this falls back to the synchronous /render call and returns the URL.
+ */
+export async function startRenderJob(job: RenderJob): Promise<{ jobId: string } | { videoUrl: string }> {
+  const url = process.env.RENDER_WORKER_URL;
+  const secret = process.env.RENDER_WORKER_SECRET;
+  if (!url || !secret) throw new RenderWorkerNotConfiguredError();
+
+  const res = await fetch(`${url.replace(/\/$/, '')}/render/start`, {
+    method: 'POST',
+    headers: workerHeaders(secret),
+    body: JSON.stringify(job),
+    signal: AbortSignal.timeout(55_000),
+  });
+  if (res.status === 404) {
+    return { videoUrl: await renderClipOnWorker(job) };
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
+  }
+  return { jobId: data.jobId as string };
+}
+
+export async function getRenderJobStatus(jobId: string): Promise<RenderJobStatus> {
+  const url = process.env.RENDER_WORKER_URL;
+  const secret = process.env.RENDER_WORKER_SECRET;
+  if (!url || !secret) throw new RenderWorkerNotConfiguredError();
+
+  const res = await fetch(`${url.replace(/\/$/, '')}/render/status/${encodeURIComponent(jobId)}`, {
+    headers: workerHeaders(secret),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `Render worker returned HTTP ${res.status}`);
+  }
+  return data as RenderJobStatus;
+}
+
 export async function renderClipOnWorker(job: RenderJob): Promise<string> {
   const url = process.env.RENDER_WORKER_URL;
   const secret = process.env.RENDER_WORKER_SECRET;
@@ -110,7 +161,7 @@ export async function getTranscriptJobStatus(jobId: string): Promise<TranscriptJ
   const secret = process.env.RENDER_WORKER_SECRET;
   if (!url || !secret) throw new RenderWorkerNotConfiguredError();
 
-  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/status/${jobId}`, {
+  const res = await fetch(`${url.replace(/\/$/, '')}/transcript/status/${encodeURIComponent(jobId)}`, {
     headers: workerHeaders(secret),
     signal: AbortSignal.timeout(20_000),
   });

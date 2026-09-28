@@ -111,17 +111,7 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
   for (const opts of [{ lang: 'en' }, {}]) {
     try {
       const raw = await YoutubeTranscript.fetchTranscript(videoId, opts as Record<string, unknown>);
-      const parsed = raw
-        .map((r: { text: string; offset?: number; duration?: number }) => {
-          const start = (r.offset ?? 0) / 1000;
-          const dur = (r.duration ?? 0) / 1000;
-          return {
-            text: decodeEntities(String(r.text || '')).replace(/\s+/g, ' ').trim(),
-            start,
-            end: start + (dur || 3),
-          };
-        })
-        .filter((s: TranscriptSegment) => s.text.length > 0 && s.text !== '[Music]');
+      const parsed = parseLibraryTranscript(raw);
       if (parsed.length) {
         transcript = parsed;
         break;
@@ -152,6 +142,96 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
     fullText,
     transcriptSource: 'captions',
   };
+}
+
+interface RawCaption {
+  text: string;
+  offset?: number;
+  duration?: number;
+}
+
+/**
+ * youtube-transcript reports timings in milliseconds for srv3 captions but in
+ * seconds for the classic <text start dur> format, without saying which. A
+ * single caption line lasting over a minute is implausible, so a median
+ * duration above 60 means milliseconds.
+ */
+export function parseLibraryTranscript(raw: RawCaption[]): TranscriptSegment[] {
+  const durations = raw.map((r) => r.duration ?? 0).filter((d) => d > 0).sort((a, b) => a - b);
+  const offsets = raw.map((r) => r.offset ?? 0);
+  const inMs = durations.length
+    ? durations[Math.floor(durations.length / 2)] > 60
+    : Math.max(0, ...offsets) > 36_000;
+  const scale = inMs ? 1000 : 1;
+
+  return raw
+    .map((r) => {
+      const start = (r.offset ?? 0) / scale;
+      const dur = (r.duration ?? 0) / scale;
+      return {
+        text: decodeEntities(String(r.text || '')).replace(/\s+/g, ' ').trim(),
+        start,
+        end: start + (dur || 3),
+      };
+    })
+    .filter((s) => s.text.length > 0 && s.text !== '[Music]');
+}
+
+const TIMESTAMP_RE = /(?:^|[\s[(])((?:\d{1,2}:)?\d{1,2}:\d{2})(?=[\])\s]|$)/g;
+
+function timestampToSeconds(ts: string): number {
+  return ts.split(':').reduce((acc, part) => acc * 60 + Number(part), 0);
+}
+
+/**
+ * Turns a pasted transcript into timed segments so clips get real start/end
+ * points and their own slice of text. Uses the timestamps if the paste has
+ * them (e.g. copied from YouTube's "Show transcript" panel); otherwise splits
+ * into sentences and estimates timing at ~150 words per minute.
+ */
+export function segmentPastedTranscript(text: string): TranscriptSegment[] {
+  const stamps = [...text.matchAll(TIMESTAMP_RE)].map((m) => ({
+    seconds: timestampToSeconds(m[1]),
+    index: (m.index ?? 0) + m[0].indexOf(m[1]),
+    length: m[1].length,
+  }));
+  const increasing = stamps.every((s, i) => i === 0 || s.seconds >= stamps[i - 1].seconds);
+
+  if (stamps.length >= 3 && increasing) {
+    const segments: TranscriptSegment[] = [];
+    stamps.forEach((s, i) => {
+      const next = stamps[i + 1];
+      const body = text
+        .slice(s.index + s.length, next ? next.index : undefined)
+        .replace(/[[\]()]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!body) return;
+      segments.push({ text: body, start: s.seconds, end: next ? Math.max(next.seconds, s.seconds + 1) : s.seconds + 5 });
+    });
+    if (segments.length) return segments;
+  }
+
+  const WORDS_PER_SECOND = 2.5;
+  const sentences = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [text];
+  const segments: TranscriptSegment[] = [];
+  let buffer: string[] = [];
+  let t = 0;
+  const flush = () => {
+    if (!buffer.length) return;
+    const chunk = buffer.join(' ').trim();
+    const seconds = Math.max(1, chunk.split(/\s+/).length / WORDS_PER_SECOND);
+    segments.push({ text: chunk, start: Math.round(t * 10) / 10, end: Math.round((t + seconds) * 10) / 10 });
+    t += seconds;
+    buffer = [];
+  };
+  for (const sentence of sentences) {
+    buffer.push(sentence.trim());
+    // ~5-10 second segments: fine enough for clip boundaries.
+    if (buffer.join(' ').split(/\s+/).length >= 15) flush();
+  }
+  flush();
+  return segments;
 }
 
 /** Compact a timestamped transcript into a token for the LLM prompt. */

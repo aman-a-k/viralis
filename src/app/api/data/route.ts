@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import type { Settings } from '@prisma/client';
 import { requireSession } from '@/lib/apiAuth';
+import { resolveLlmConfig } from '@/lib/llm';
+import { renderWorkerConfigured } from '@/lib/renderWorker';
 
 export async function GET() {
   const auth = await requireSession();
@@ -34,6 +36,37 @@ export async function GET() {
       where: { status: 'pending' },
       orderBy: { createdAt: 'desc' }
     });
+
+    // Autopilot output (scripts, not videos) in every state, so the
+    // Autopilot tab can show what a run produced even after it's reviewed.
+    const autopilotScripts = await prisma.approvalQueue.findMany({
+      where: { clipId: null },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+
+    // Content Library: every clip that has a real rendered file.
+    const renderedClips = await prisma.clip.findMany({
+      where: { videoUrl: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 60,
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        startTime: true,
+        endTime: true,
+        duration: true,
+        viralityScore: true,
+        hookType: true,
+        videoUrl: true,
+        status: true,
+        createdAt: true,
+        project: { select: { title: true, thumbnail: true } },
+      },
+    });
+
+    const llm = await resolveLlmConfig();
 
     // Full transcripts (often 100KB+ each) are never shown on the dashboard
     // and this route is polled every 30s — leave them out.
@@ -131,16 +164,13 @@ export async function GET() {
           brandTone: settings.brandTone || '',
           targetAudience: settings.targetAudience || '',
           videoStyle: settings.videoStyle || '',
-          aiProvider: (settings as { aiProvider?: string }).aiProvider || 'gemini',
-          hasAiKey: !!(
-            (settings as { aiApiKey?: string }).aiApiKey ||
-            settings.openAiKey ||
-            process.env.GEMINI_API_KEY ||
-            process.env.GROQ_API_KEY ||
-            process.env.OPENAI_API_KEY
-          ),
-          aiModel: (settings as { aiModel?: string }).aiModel || '',
-          hasOpenAi: !!((settings as { aiApiKey?: string }).aiApiKey || settings.openAiKey),
+          // What getLlmClient() will actually use, so the badge can't claim a
+          // key is set for a provider that won't be called with it.
+          aiProvider: llm.provider,
+          hasAiKey: Boolean(llm.key),
+          aiKeySource: llm.keySource,
+          aiModel: settings.aiModel || '',
+          hasOpenAi: !!(settings.aiApiKey || settings.openAiKey),
           youtubeClientId: settings.youtubeClientId || '',
           hasYoutubeClientSecret: !!settings.youtubeClientSecret,
           hasYoutubeAuth: !!settings.youtubeRefreshToken,
@@ -164,7 +194,10 @@ export async function GET() {
         },
         agents,
         trends,
-        approvalQueue
+        approvalQueue,
+        autopilotScripts,
+        renderedClips,
+        renderWorkerConfigured: renderWorkerConfigured(),
       }
     });
   } catch (error) {

@@ -3,7 +3,7 @@ import { getLlmClient } from '../lib/llm';
 export interface AgentResponse {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
   error?: string;
 }
 
@@ -16,7 +16,7 @@ export abstract class BaseAgent {
     this.role = role;
   }
 
-  abstract run(input: any): Promise<AgentResponse>;
+  abstract run(input?: unknown): Promise<AgentResponse>;
 
   /** Plain-text completion. */
   protected async chat(prompt: string): Promise<string> {
@@ -33,7 +33,7 @@ export abstract class BaseAgent {
   }
 
   /** JSON completion — asks for and parses a strict JSON object. */
-  protected async chatJSON<T = any>(prompt: string): Promise<T> {
+  protected async chatJSON<T = Record<string, unknown>>(prompt: string): Promise<T> {
     const { client, model } = await getLlmClient();
     const res = await client.chat.completions.create({
       model,

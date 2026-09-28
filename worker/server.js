@@ -2,10 +2,10 @@
 //
 // Standalone service (deployed separately — e.g. Render — because Vercel's
 // serverless functions can't run ffmpeg/yt-dlp or hold a job open long
-// enough). Receives one clip job at a time from the Next.js app, downloads
-// just that time range of the source video, cuts + reframes + burns
-// captions with ffmpeg, uploads the result to Vercel Blob, and returns the
-// public URL synchronously.
+// enough). Receives clip jobs from the Next.js app, downloads just that time
+// range of the source video, cuts + reframes + burns captions with ffmpeg,
+// and uploads the result to Vercel Blob. Renders run as background jobs the
+// app polls (POST /render/start, GET /render/status/:jobId).
 //
 // Also runs transcription: YouTube now blocks anonymous automated access to
 // both video and captions, and even authenticated (cookie) requests can't
@@ -71,12 +71,9 @@ function checkAuth(req, res) {
   return true;
 }
 
-app.post('/render', async (req, res) => {
-  if (!checkAuth(req, res)) return;
-  if (!BLOB_TOKEN) {
-    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
-  }
+class BadRequestError extends Error {}
 
+function validateRenderJob(body) {
   const {
     youtubeUrl,
     startTime,
@@ -85,12 +82,24 @@ app.post('/render', async (req, res) => {
     captionText = '',
     captionStyle = 'Dynamic Pop',
     clipId,
-  } = req.body || {};
-
+  } = body || {};
   if (!youtubeUrl || typeof startTime !== 'number' || typeof endTime !== 'number' || endTime <= startTime) {
-    return res.status(400).json({ success: false, error: 'youtubeUrl, startTime and endTime are required.' });
+    throw new BadRequestError('youtubeUrl, startTime and endTime are required.');
   }
+  return { youtubeUrl, startTime, endTime, aspectRatio, captionText, captionStyle, clipId };
+}
 
+// One render at a time: two concurrent 1080p ffmpeg encodes (plus yt-dlp)
+// don't fit in a 512MB free-tier instance.
+let renderChain = Promise.resolve();
+function enqueueRender(job) {
+  const run = renderChain.then(() => renderClip(job));
+  renderChain = run.catch(() => {});
+  return run;
+}
+
+/** Downloads just the clip's range, reframes it, burns captions, uploads. Returns the public URL. */
+async function renderClip({ youtubeUrl, startTime, endTime, aspectRatio, captionText, captionStyle, clipId }) {
   const duration = Math.min(90, endTime - startTime);
   const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-'));
   const rawPath = path.join(workDir, 'raw.mp4');
@@ -139,28 +148,97 @@ app.post('/render', async (req, res) => {
         '-movflags', '+faststart',
         outPath,
       ],
-      { timeout: 5 * 60 * 1000 }
+      { timeout: 15 * 60 * 1000 }
     );
 
     const fileBuffer = await readFile(outPath);
-    const filename = `clips/${clipId || Date.now()}_${aspectRatio.replace(':', 'x')}.mp4`;
+    const filename = `clips/${clipId || Date.now()}_${String(aspectRatio).replace(':', 'x')}.mp4`;
     console.log(`[render] clip ${clipId || '?'}: uploading (${(fileBuffer.length / 1e6).toFixed(1)}MB)`);
     const blob = await put(filename, fileBuffer, {
       access: 'public',
       contentType: 'video/mp4',
       token: BLOB_TOKEN,
     });
+    return blob.url;
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
-    res.json({ success: true, videoUrl: blob.url });
+// Synchronous render — kept for older app builds. Only finishes in time for
+// short clips on a fast instance; new callers use /render/start.
+app.post('/render', async (req, res) => {
+  if (!checkAuth(req, res)) return;
+  if (!BLOB_TOKEN) {
+    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
+  }
+  try {
+    const videoUrl = await enqueueRender(validateRenderJob(req.body));
+    res.json({ success: true, videoUrl });
   } catch (err) {
+    if (err instanceof BadRequestError) return res.status(400).json({ success: false, error: err.message });
     console.error('[render] failed:', err?.stderr?.toString?.() || err?.message || err);
     res.status(500).json({
       success: false,
       error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
     });
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+// --- Rendering (background job) --------------------------------------------
+//
+// Download + 1080p re-encode takes minutes on a free-tier CPU — far longer
+// than the app's serverless request can wait — so, like transcription, it's
+// fire-and-poll: POST /render/start returns a job id immediately and the app
+// polls GET /render/status/:jobId. In-memory only, like transcript jobs.
+const renderJobs = new Map();
+
+function pruneRenderJobs() {
+  const now = Date.now();
+  for (const [id, job] of renderJobs) {
+    if (job.status !== 'processing' && now - job.updatedAt > JOB_RETENTION_MS) renderJobs.delete(id);
+  }
+}
+
+app.post('/render/start', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  if (!BLOB_TOKEN) {
+    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
+  }
+  let job;
+  try {
+    job = validateRenderJob(req.body);
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+
+  pruneRenderJobs();
+  const jobId = randomUUID();
+  renderJobs.set(jobId, { status: 'processing', clipId: job.clipId, updatedAt: Date.now() });
+  enqueueRender(job).then(
+    (videoUrl) => renderJobs.set(jobId, { status: 'done', videoUrl, clipId: job.clipId, updatedAt: Date.now() }),
+    (err) => {
+      console.error(`[render ${jobId}] failed:`, err?.stderr?.toString?.() || err?.message || err);
+      renderJobs.set(jobId, {
+        status: 'error',
+        clipId: job.clipId,
+        error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
+        updatedAt: Date.now(),
+      });
+    }
+  );
+  res.json({ success: true, jobId });
+});
+
+app.get('/render/status/:jobId', (req, res) => {
+  if (!checkAuth(req, res)) return;
+  const job = renderJobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ success: false, error: 'Unknown or expired job id.' });
+  }
+  if (job.status === 'processing') return res.json({ success: true, status: 'processing' });
+  if (job.status === 'error') return res.json({ success: true, status: 'error', error: job.error });
+  res.json({ success: true, status: 'done', videoUrl: job.videoUrl, clipId: job.clipId });
 });
 
 // --- Transcription (background job) ---------------------------------------

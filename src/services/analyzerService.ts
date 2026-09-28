@@ -28,19 +28,25 @@ const EMPTY_CAPTIONS: PlatformCaptions = {
   tiktok: '',
 };
 
-function clampClip(raw: any, duration: number): AnalyzedClip | null {
+/** A clip as the model returned it — any field may be missing or mistyped. */
+type RawClip = Record<string, unknown> & { captions?: Record<string, unknown> };
+
+function clampClip(raw: RawClip, videoDuration: number): AnalyzedClip | null {
   let start = Number(raw?.startTime ?? raw?.start ?? NaN);
   let end = Number(raw?.endTime ?? raw?.end ?? NaN);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
 
-  start = Math.max(0, Math.min(start, duration - 5));
+  // Unknown duration (0) would otherwise clamp every clip to 0–0.
+  const duration = videoDuration > 0 ? videoDuration : Math.max(end, start + 20);
+  start = Math.max(0, Math.min(start, Math.max(0, duration - 5)));
   end = Math.max(start + 8, Math.min(end, duration));
   // keep clips in a shareable 12–75s range
   if (end - start > 75) end = start + 75;
   if (end - start < 12) end = Math.min(duration, start + 20);
+  if (end <= start) return null;
 
-  const score = Math.max(1, Math.min(100, Math.round(Number(raw?.viralityScore ?? raw?.score ?? 70))));
-  const caps = raw?.captions ?? {};
+  const score = Math.max(1, Math.min(100, Math.round(Number(raw?.viralityScore ?? raw?.score ?? 70) || 70)));
+  const caps = (raw?.captions ?? {}) as Record<string, unknown>;
 
   return {
     title: String(raw?.title || 'Untitled highlight').slice(0, 120),
@@ -124,7 +130,7 @@ Return JSON exactly: { "clips": [ { ... } ] }  — ordered by viralityScore desc
   });
 
   const content = response.choices[0]?.message?.content || '{}';
-  let parsed: any;
+  let parsed: RawClip[] | { clips?: RawClip[]; highlights?: RawClip[] };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -134,8 +140,9 @@ Return JSON exactly: { "clips": [ { ... } ] }  — ordered by viralityScore desc
     parsed = JSON.parse(m[0]);
   }
 
-  const rawClips: any[] = Array.isArray(parsed) ? parsed : parsed.clips || parsed.highlights || [];
-  const clips = rawClips
+  const rawClips: RawClip[] = Array.isArray(parsed) ? parsed : parsed?.clips || parsed?.highlights || [];
+  const clips = (Array.isArray(rawClips) ? rawClips : [])
+    .filter((c) => c && typeof c === 'object')
     .map((c) => clampClip(c, video.durationSeconds))
     .filter((c): c is AnalyzedClip => c !== null)
     .map((c) => {

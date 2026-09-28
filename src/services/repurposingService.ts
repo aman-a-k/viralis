@@ -1,13 +1,21 @@
 import { prisma } from '../lib/prisma';
 import { analyzeTranscript, MissingApiKeyError, type AnalyzedClip, type AnalyzeOptions } from './analyzerService';
-import { fetchYouTubeVideo, fetchYouTubeMetadata, isYouTubeUrl, type TranscriptSegment } from './youtubeService';
+import {
+  fetchYouTubeVideo,
+  fetchYouTubeMetadata,
+  isYouTubeUrl,
+  segmentPastedTranscript,
+  type TranscriptSegment,
+} from './youtubeService';
 import { describeLlmError } from '../lib/llm';
 import {
-  renderClipOnWorker,
+  startRenderJob,
+  getRenderJobStatus,
   renderWorkerConfigured,
   startTranscriptJob,
   getTranscriptJobStatus,
   warmUpWorker,
+  type RenderJobStatus,
 } from '../lib/renderWorker';
 
 export interface RunConfig {
@@ -173,7 +181,25 @@ export class RepurposingService {
       throw new Error('This project has no transcription job to check.');
     }
 
-    const jobStatus = await getTranscriptJobStatus(project.transcriptJobId);
+    let jobStatus;
+    try {
+      jobStatus = await getTranscriptJobStatus(project.transcriptJobId);
+    } catch (err) {
+      // Jobs live in the worker's memory, so a worker restart/redeploy (or
+      // the 1h result retention running out) loses them for good — without
+      // this the project would sit in "transcribing" forever.
+      if (err instanceof Error && /unknown or expired job/i.test(err.message)) {
+        const updated = await prisma.project.update({
+          where: { id: projectId },
+          data: {
+            status: 'failed',
+            errorMessage: 'The transcription job was lost (the render worker restarted or the result expired). Add the video again to retry.',
+          },
+        });
+        return { status: 'failed' as const, project: updated, clips: [] as never[] };
+      }
+      throw err;
+    }
     if (jobStatus.status === 'processing') {
       return { status: 'transcribing' as const, project, clips: [] as never[] };
     }
@@ -201,6 +227,25 @@ export class RepurposingService {
     const fullText = segments.map((s) => s.text).join(' ');
     const durationSeconds = segments.length ? Math.ceil(segments[segments.length - 1].end) : 0;
 
+    // Claim the project before analyzing: polls can overlap (the tab's poll
+    // loop, a "Check now" click, a second tab), and each would otherwise run
+    // its own analysis and persist a duplicate set of clips. Saving the
+    // transcript here also means Re-analyze works if the analysis fails.
+    const claimed = await prisma.project.updateMany({
+      where: { id: projectId, status: 'transcribing' },
+      data: {
+        status: 'processing',
+        duration: durationSeconds,
+        transcript: fullText,
+        transcriptJson: JSON.stringify(segments),
+      },
+    });
+    if (claimed.count === 0) {
+      const current = await prisma.project.findUnique({ where: { id: projectId } });
+      const clips = await prisma.clip.findMany({ where: { projectId }, orderBy: { viralityScore: 'desc' } });
+      return { status: (current?.status ?? 'processing') as 'processing' | 'ready' | 'failed', project: current ?? project, clips };
+    }
+
     let meta: { desiredClipCount?: number; config?: RunConfig } = {};
     try {
       meta = project.metadata ? JSON.parse(project.metadata) : {};
@@ -226,12 +271,7 @@ export class RepurposingService {
       const clips = await this.persistClips(projectId, highlights, meta.config ?? {});
       const updated = await prisma.project.update({
         where: { id: projectId },
-        data: {
-          status: 'ready',
-          duration: durationSeconds,
-          transcript: fullText,
-          transcriptJson: JSON.stringify(segments),
-        },
+        data: { status: 'ready', errorMessage: null },
       });
 
       let queued = 0;
@@ -258,8 +298,10 @@ export class RepurposingService {
   }
 
   static async ingestPastedTranscript(title: string, text: string, desiredClipCount = 5, config: RunConfig = {}) {
-    // Build a single-segment transcript so the analyzer has something to work with.
-    const approxDuration = Math.max(120, Math.round(text.split(/\s+/).length / 2.5));
+    // Split into timed segments so each clip gets its own start/end and its
+    // own slice of text (one giant segment gave every clip the whole transcript).
+    const segments = segmentPastedTranscript(text);
+    const approxDuration = Math.ceil(segments[segments.length - 1]?.end || 0);
     const video = {
       videoId: '',
       url: '',
@@ -268,8 +310,8 @@ export class RepurposingService {
       description: '',
       durationSeconds: approxDuration,
       thumbnail: null,
-      transcript: [{ text, start: 0, end: approxDuration }],
-      fullText: text,
+      transcript: segments,
+      fullText: segments.map((s) => s.text).join(' '),
       transcriptSource: 'captions' as const,
     };
 
@@ -348,8 +390,8 @@ export class RepurposingService {
     const highlights = await analyzeTranscript(video, desiredClipCount, config);
     await prisma.clip.deleteMany({ where: { projectId, status: 'candidate' } });
     const clips = await this.persistClips(projectId, highlights, config);
-    await prisma.project.update({ where: { id: projectId }, data: { status: 'ready', errorMessage: null } });
-    return { project, clips };
+    const updated = await prisma.project.update({ where: { id: projectId }, data: { status: 'ready', errorMessage: null } });
+    return { project: updated, clips };
   }
 
   /**
@@ -360,6 +402,14 @@ export class RepurposingService {
   static async queueClip(clipId: string) {
     const clip = await prisma.clip.findUnique({ where: { id: clipId }, include: { project: true } });
     if (!clip) throw new Error('Clip not found.');
+
+    // Already waiting for review — don't create a second copy (double clicks,
+    // or an Automatic run over a clip that was queued by hand).
+    const alreadyQueued = await prisma.approvalQueue.findFirst({ where: { clipId, status: 'pending' } });
+    if (alreadyQueued) {
+      if (clip.status !== 'approved') await prisma.clip.update({ where: { id: clipId }, data: { status: 'approved' } });
+      return clip;
+    }
 
     let parsedCaptions: Record<string, string> = {};
     try {
@@ -391,34 +441,87 @@ export class RepurposingService {
   }
 
   /**
-   * Cuts the real clip via the standalone render worker (see /worker) and
-   * saves the resulting video URL. Throws RenderWorkerNotConfiguredError if
-   * the worker isn't wired up yet.
+   * Starts cutting the real clip on the standalone render worker (see
+   * /worker). Rendering takes minutes, so this returns a job id to poll with
+   * checkRender() — or the finished URL straight away if the worker is an
+   * older synchronous build. Throws RenderWorkerNotConfiguredError if the
+   * worker isn't wired up yet.
    */
-  static async renderClip(
+  static async startRender(
     clipId: string,
-    aspectRatio: '9:16' | '1:1' | '16:9' = '9:16',
-    captionStyle: string = 'Dynamic Pop'
-  ): Promise<string> {
+    aspectRatio?: string,
+    captionStyle?: string
+  ): Promise<{ status: 'rendering'; jobId: string } | { status: 'done'; videoUrl: string }> {
     const clip = await prisma.clip.findUnique({ where: { id: clipId }, include: { project: true } });
     if (!clip) throw new Error('Clip not found.');
     if (!clip.project.sourceVideoUrl || clip.project.sourceType !== 'youtube') {
       throw new Error('This clip has no YouTube source to render from (it came from a pasted transcript).');
     }
 
-    const videoUrl = await renderClipOnWorker({
+    // Default to the clip's first chosen orientation and the workspace caption style.
+    let ratio = RENDER_RATIOS.find((r) => r === aspectRatio);
+    if (!ratio) {
+      let chosen: string[] = [];
+      try {
+        chosen = JSON.parse(clip.aspectRatios);
+      } catch {
+        /* fall back to 9:16 */
+      }
+      ratio = RENDER_RATIOS.find((r) => chosen.includes(r)) ?? '9:16';
+    }
+    const style =
+      captionStyle ||
+      (await prisma.settings.findFirst({ where: { id: 'default' } }))?.captionStyle ||
+      'Dynamic Pop';
+
+    const started = await startRenderJob({
       clipId: clip.id,
       youtubeUrl: clip.project.sourceVideoUrl,
       startTime: clip.startTime,
       endTime: clip.endTime,
-      aspectRatio,
+      aspectRatio: ratio,
       captionText: clip.transcriptSegment,
-      captionStyle,
+      captionStyle: style,
     });
 
-    await prisma.clip.update({ where: { id: clipId }, data: { videoUrl } });
-    return videoUrl;
+    await prisma.approvalQueue.updateMany({
+      where: { clipId, renderStatus: { in: ['pending', 'failed'] } },
+      data: { renderStatus: 'rendering', renderError: null },
+    });
+
+    if ('videoUrl' in started) {
+      await this.saveRender(clipId, { status: 'done', videoUrl: started.videoUrl });
+      return { status: 'done', videoUrl: started.videoUrl };
+    }
+    return { status: 'rendering', jobId: started.jobId };
+  }
+
+  /** Polls a render job; once it finishes, saves the video URL onto the clip. */
+  static async checkRender(clipId: string, jobId: string) {
+    const job = await getRenderJobStatus(jobId);
+    if (job.status === 'done' && job.clipId && job.clipId !== clipId) {
+      throw new Error('That render job belongs to a different clip.');
+    }
+    await this.saveRender(clipId, job);
+    return job;
+  }
+
+  private static async saveRender(clipId: string, job: RenderJobStatus) {
+    if (job.status === 'done') {
+      await prisma.clip.update({ where: { id: clipId }, data: { videoUrl: job.videoUrl } });
+      await prisma.approvalQueue.updateMany({
+        where: { clipId, renderStatus: { not: 'rendered' } },
+        data: { renderStatus: 'rendered', renderError: null },
+      });
+    } else if (job.status === 'error') {
+      await prisma.approvalQueue.updateMany({
+        where: { clipId, renderStatus: 'rendering' },
+        data: { renderStatus: 'failed', renderError: job.error },
+      });
+    }
   }
 }
+
+const RENDER_RATIOS = ['9:16', '1:1', '16:9'] as const;
 
 export type { AnalyzeOptions };

@@ -42,9 +42,10 @@ Evaluate its potential for a viral Short/Reel. Return JSON:
         message: `Trend identified: ${trend.topic}`,
         data: { originalTrend: trend, aiAnalysis: analysis },
       };
-    } catch (error: any) {
-      this.log(`Error: ${error.message}`);
-      return { success: false, message: 'Trend analysis failed.', error: error.message };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`Error: ${message}`);
+      return { success: false, message: 'Trend analysis failed.', error: message };
     }
   }
 }

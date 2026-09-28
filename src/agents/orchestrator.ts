@@ -1,6 +1,23 @@
 import { TrendAgent } from './trendAgent';
 import { ContentAgent } from './contentAgent';
 import { prisma } from '../lib/prisma';
+import type { GeneratedContent, TrendData } from '../types';
+
+interface TrendStepData {
+  originalTrend: TrendData;
+  aiAnalysis?: { isViable?: boolean };
+}
+
+interface ContentStepData {
+  original: GeneratedContent & { topic: string };
+  polished?: {
+    polishedScript?: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    refinedScenes?: unknown[];
+  };
+}
 
 /**
  * Autopilot: discover a trend -> write + optimize a script -> drop it in the
@@ -17,7 +34,7 @@ export class Orchestrator {
     const trendResult = await this.trendAgent.run();
     if (!trendResult.success) throw new Error(trendResult.error || trendResult.message);
 
-    const { originalTrend, aiAnalysis } = trendResult.data;
+    const { originalTrend, aiAnalysis } = trendResult.data as TrendStepData;
     if (aiAnalysis?.isViable === false) {
       console.log(`[Orchestrator] "${originalTrend.topic}" judged not viable — skipping.`);
       return { success: true, message: `Skipped "${originalTrend.topic}" (not viable).` };
@@ -26,7 +43,7 @@ export class Orchestrator {
     const contentResult = await this.contentAgent.run(originalTrend);
     if (!contentResult.success) throw new Error(contentResult.error || contentResult.message);
 
-    const { original, polished } = contentResult.data;
+    const { original, polished } = contentResult.data as ContentStepData;
 
     await prisma.approvalQueue.create({
       data: {

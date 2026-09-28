@@ -40,9 +40,10 @@ Return JSON: {"polishedScript": string, "hook": string, "cta": string, "title": 
         message: 'Script written and optimized.',
         data: { original: { ...base, topic: trendData.topic }, polished },
       };
-    } catch (error: any) {
-      this.log(`Error: ${error.message}`);
-      return { success: false, message: 'Failed to generate content.', error: error.message };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`Error: ${message}`);
+      return { success: false, message: 'Failed to generate content.', error: message };
     }
   }
 }

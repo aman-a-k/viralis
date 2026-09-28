@@ -58,30 +58,61 @@ export interface LlmClient {
   provider: AiProvider;
 }
 
-function normalizeProvider(v: string | null | undefined): AiProvider {
+function asProvider(v: string | null | undefined): AiProvider | null {
   const p = (v || '').toLowerCase();
-  return p === 'gemini' || p === 'groq' || p === 'openai' ? p : 'openai';
+  return p === 'gemini' || p === 'groq' || p === 'openai' ? p : null;
+}
+
+export interface LlmConfig {
+  provider: AiProvider;
+  /** Empty when no key is configured anywhere. */
+  key: string;
+  model: string;
+  keySource: 'settings' | 'env' | null;
+}
+
+/**
+ * Works out which provider + key to use. A key saved in Settings always goes
+ * with the provider picked next to it. Otherwise it falls back to whichever
+ * provider has a key in the server environment — a key is never sent to a
+ * provider it doesn't belong to (Settings.aiProvider defaults to "gemini" in
+ * the database, which used to route an env OPENAI_API_KEY to Gemini).
+ */
+export async function resolveLlmConfig(): Promise<LlmConfig> {
+  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+  const savedProvider = asProvider(settings?.aiProvider);
+  const envProvider = asProvider(process.env.AI_PROVIDER);
+
+  const modelFor = (provider: AiProvider, fromSettings: boolean) =>
+    (fromSettings && settings?.aiModel) ||
+    (provider === envProvider && process.env.AI_MODEL) ||
+    PROVIDERS[provider].defaultModel;
+
+  if (settings?.aiApiKey) {
+    const provider = savedProvider || envProvider || 'gemini';
+    return { provider, key: settings.aiApiKey, model: modelFor(provider, true), keySource: 'settings' };
+  }
+  if (settings?.openAiKey) {
+    // Legacy field — always an OpenAI key.
+    return { provider: 'openai', key: settings.openAiKey, model: modelFor('openai', savedProvider === 'openai'), keySource: 'settings' };
+  }
+
+  const candidates = [envProvider, savedProvider, 'gemini', 'groq', 'openai'] as (AiProvider | null)[];
+  for (const provider of candidates) {
+    if (!provider) continue;
+    const key = process.env[PROVIDERS[provider].keyEnv];
+    if (key) return { provider, key, model: modelFor(provider, provider === savedProvider), keySource: 'env' };
+  }
+
+  const provider = savedProvider || envProvider || 'gemini';
+  return { provider, key: '', model: modelFor(provider, true), keySource: null };
 }
 
 /** Resolve the AI provider + key from workspace Settings, falling back to env. */
 export async function getLlmClient(): Promise<LlmClient> {
-  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-
-  const provider = normalizeProvider(
-    settings?.aiProvider || process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'openai')
-  );
-  const cfg = PROVIDERS[provider];
-
-  const key =
-    settings?.aiApiKey ||
-    settings?.openAiKey || // legacy field
-    process.env[cfg.keyEnv] ||
-    process.env.OPENAI_API_KEY ||
-    '';
-
+  const { provider, key, model } = await resolveLlmConfig();
   if (!key) throw new MissingApiKeyError(provider);
-
-  const model = settings?.aiModel || process.env.AI_MODEL || cfg.defaultModel;
+  const cfg = PROVIDERS[provider];
 
   return {
     client: new OpenAI({
@@ -107,5 +138,9 @@ export function describeLlmError(err: unknown): string {
     return 'The AI provider is temporarily overloaded. Try again in a moment.';
   if (has(401) || has(403))
     return 'The AI API key was rejected. Check it in Settings.';
+  if (has(404))
+    return 'The AI provider doesn’t recognize that model. Clear the Model field in Settings to use the default.';
+  if (has(400))
+    return 'The AI provider rejected the request — usually the key belongs to a different provider than the one selected, or the model name is wrong. Check Settings → AI Engine.';
   return msg || 'AI request failed.';
 }

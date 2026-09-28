@@ -59,6 +59,19 @@ async function getApiKey(): Promise<string | null> {
   return settings?.youtubeDataApiKey || process.env.YOUTUBE_API_KEY || null;
 }
 
+interface YouTubeApiVideo {
+  id: string;
+  snippet?: {
+    title?: string;
+    categoryId?: string;
+    channelTitle?: string;
+    publishedAt?: string;
+    thumbnails?: { medium?: { url?: string }; default?: { url?: string } };
+  };
+  contentDetails?: { duration?: string };
+  statistics?: { viewCount?: string; likeCount?: string };
+}
+
 /** Real trending videos from the YouTube Data API (chart=mostPopular). */
 export async function fetchTrendingVideos(opts: {
   regionCode?: string;
@@ -90,7 +103,7 @@ export async function fetchTrendingVideos(opts: {
   }
 
   const data = await res.json();
-  const items: any[] = data.items || [];
+  const items: YouTubeApiVideo[] = data.items || [];
 
   return items.map((v) => {
     const title: string = v.snippet?.title || 'Untitled';

@@ -9,8 +9,8 @@ export async function GET() {
   try {
     const report = await FeedbackLoopService.getFeedbackLoopReport();
     return NextResponse.json({ success: true, report });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[API /api/analytics/loop] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });
   }
 }
