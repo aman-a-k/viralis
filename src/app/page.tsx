@@ -15,6 +15,7 @@ import { AgentStatusView } from '@/components/AgentStatusView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
 import { ApprovalQueueView } from '@/components/ApprovalQueueView';
 import { LandingPage } from '@/components/LandingPage';
+import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
 import { signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
@@ -436,7 +437,7 @@ export default function Dashboard() {
                 {activeTab === 'autopilot' && "Scan trends and autonomously write a script, then send it to your Approval Queue for review."}
                 {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
                 {activeTab === 'learning-loop' && "Real performance of your published clips — watch-through, winning hook styles, and drop-offs."}
-                {activeTab === 'trends' && "Real-time Google Trends signals and back-catalog matching."}
+                {activeTab === 'trends' && "Trending topics Autopilot has picked up from Google Trends."}
                 {activeTab === 'agents' && "Multi-agent execution across highlight detection, editing, and distribution."}
                 {activeTab === 'settings' && "API keys, OAuth connections, and brand voice."}
                 {activeTab === 'content' && "Every rendered clip and autopilot video in one catalog."}
@@ -464,6 +465,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <SectionErrorBoundary key={activeTab} section="This page">
           {/* OVERVIEW TAB */}
           {activeTab === 'overview' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -933,6 +935,7 @@ export default function Dashboard() {
               </form>
             </div>
           )}
+          </SectionErrorBoundary>
         </main>
       </div>
     </div>
