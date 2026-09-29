@@ -92,6 +92,8 @@ export interface ClipData {
   status: 'candidate' | 'approved' | 'scheduled' | 'published' | 'rejected';
   createdAt: string;
   metrics?: MetricData[];
+  /** Latest YouTube publish attempt, if any. */
+  schedules?: { status: string; postUrl?: string | null; error?: string | null }[];
 }
 
 export interface ProjectData {
@@ -151,7 +153,8 @@ export interface FeedbackLoopData {
    * every figure below is illustrative sample data, not the account's own
    * results. */
   isSampleData: boolean;
-  overallWatchThrough: number;
+  /** null when clips have views but no retention data (needs YouTube Analytics access). */
+  overallWatchThrough: number | null;
   clipsMeasured: number;
   totalViews: number;
   highPerformingHooks: string[];

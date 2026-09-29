@@ -30,13 +30,6 @@ function SampleRetentionChart() {
 
       <div style={{ width: '100%', height: '180px', position: 'relative' }}>
         <svg viewBox="0 0 500 160" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-          <defs>
-            <linearGradient id="viralisGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.3" />
-              <stop offset="100%" stopColor="#4f46e5" stopOpacity="0.0" />
-            </linearGradient>
-          </defs>
-
           {/* Grid Lines */}
           <line x1="0" y1="30" x2="500" y2="30" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
           <line x1="0" y1="80" x2="500" y2="80" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
@@ -46,26 +39,35 @@ function SampleRetentionChart() {
           <path
             d="M 0,40 Q 60,110 160,125 T 350,135 T 500,145"
             fill="none"
-            stroke="#52525b"
+            stroke="rgba(255,255,255,0.15)"
             strokeWidth="2"
-            strokeDasharray="4 4"
           />
 
-          {/* Viralis Curve (indigo area + stroke) */}
-          <path
-            d="M 0,25 Q 70,35 160,50 T 350,70 T 500,80 L 500,160 L 0,160 Z"
-            fill="url(#viralisGrad)"
-          />
+          {/* Viralis Curve (White solid line) */}
           <path
             d="M 0,25 Q 70,35 160,50 T 350,70 T 500,80"
             fill="none"
-            stroke="#6366f1"
+            stroke="#ffffff"
             strokeWidth="2.5"
           />
 
+          {/* Data point dots for professional look */}
+          <circle cx="0" cy="25" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+          <circle cx="85" cy="38" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+          <circle cx="160" cy="50" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+          <circle cx="260" cy="62" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+          <circle cx="350" cy="70" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+          <circle cx="500" cy="80" r="3" fill="#ffffff" stroke="#000" strokeWidth="1" />
+
+          {/* Baseline dots */}
+          <circle cx="0" cy="40" r="2" fill="rgba(255,255,255,0.3)" />
+          <circle cx="160" cy="125" r="2" fill="rgba(255,255,255,0.3)" />
+          <circle cx="350" cy="135" r="2" fill="rgba(255,255,255,0.3)" />
+          <circle cx="500" cy="145" r="2" fill="rgba(255,255,255,0.3)" />
+
           {/* Drop-off marker */}
-          <circle cx="50" cy="32" r="4" fill="#10b981" />
-          <text x="60" y="28" fill="#10b981" fontSize="10" fontWeight="700">3s Hook Retained (+88%)</text>
+          <circle cx="50" cy="32" r="4" fill="#ffffff" stroke="#10b981" strokeWidth="2" />
+          <text x="60" y="28" fill="#ffffff" fontSize="10" fontWeight="600">3s Hook Retained (+88%)</text>
         </svg>
       </div>
 
@@ -116,6 +118,7 @@ function SampleWeights({ weights }: { weights: NonNullable<FeedbackLoopData['mod
 export function FeedbackLoopView() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [feedbackData, setFeedbackData] = useState<FeedbackLoopData | null>(null);
 
   const fetchLoopData = async () => {
@@ -141,6 +144,28 @@ export function FeedbackLoopView() {
   useEffect(() => {
     fetchLoopData();
   }, []);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    toast.loading('Pulling the latest numbers from YouTube…', { id: 'sync' });
+    try {
+      const res = await fetch('/api/analytics/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) {
+        toast.error(data.error || 'Sync failed.', { id: 'sync', duration: 8000 });
+      } else if (data.videosChecked === 0) {
+        toast('Nothing to sync yet — publish a clip to YouTube first.', { id: 'sync' });
+      } else {
+        toast.success(`Updated ${data.snapshotsSaved} clip${data.snapshotsSaved === 1 ? '' : 's'}.`, { id: 'sync' });
+        if (data.retentionNote) toast(data.retentionNote, { duration: 10000, icon: 'ℹ️' });
+        await fetchLoopData();
+      }
+    } catch {
+      toast.error('Network error while syncing.', { id: 'sync' });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -190,9 +215,14 @@ export function FeedbackLoopView() {
             How your published clips actually perform: average watch-through, which hook styles hold viewers, and which clips lost them.
           </p>
         </div>
-        <button onClick={fetchLoopData} className="btn btn-secondary" style={{ fontSize: '0.75rem' }}>
-          <RefreshCw size={13} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={fetchLoopData} className="btn btn-secondary" style={{ fontSize: '0.75rem' }}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+          <button onClick={syncNow} disabled={syncing} className="btn btn-primary" style={{ fontSize: '0.75rem' }}>
+            <RefreshCw size={13} className={syncing ? 'animate-spin' : undefined} /> Sync from YouTube
+          </button>
+        </div>
       </div>
 
       <div className="grid-metrics">
@@ -201,7 +231,14 @@ export function FeedbackLoopView() {
             <span className="text-subtle" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Avg. watch-through</span>
             <Target size={15} color="#10b981" />
           </div>
-          <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>{overallWatchThrough}%</p>
+          <p style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--foreground)' }}>
+            {overallWatchThrough === null ? '—' : `${overallWatchThrough}%`}
+          </p>
+          {overallWatchThrough === null && (
+            <p className="text-subtle" style={{ fontSize: '0.6875rem', marginTop: '0.25rem' }}>
+              Needs YouTube Analytics access — reconnect YouTube in Settings.
+            </p>
+          )}
         </div>
         <div className="panel-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

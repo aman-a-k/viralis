@@ -54,7 +54,10 @@ export async function GET() {
         updatedAt: true,
         clips: {
           orderBy: { viralityScore: 'desc' },
-          include: { metrics: true },
+          include: {
+            metrics: true,
+            schedules: { where: { platform: 'youtube' }, orderBy: { createdAt: 'desc' }, take: 1 },
+          },
         },
       },
       take: 10,
@@ -62,8 +65,9 @@ export async function GET() {
 
     const totalClipsCount = await prisma.clip.count();
 
-    const watchThrough = await prisma.metric.aggregate({ _avg: { watchThroughPct: true }, _count: true });
-    const avgWatchThrough = watchThrough._count > 0 ? Math.round(watchThrough._avg.watchThroughPct ?? 0) : null;
+    const watchThrough = await prisma.metric.aggregate({ _avg: { watchThroughPct: true } });
+    const avgWatchThrough =
+      watchThrough._avg.watchThroughPct !== null ? Math.round(watchThrough._avg.watchThroughPct) : null;
 
     const agents = [
       {

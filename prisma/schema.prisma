@@ -172,6 +172,8 @@ model Schedule {
   publishedTime DateTime?
   status        String    @default("pending") // "pending", "published", "failed"
   postId        String?
+  postUrl       String?
+  error         String?
   createdAt     DateTime  @default(now())
 
   @@index([clipId])
@@ -188,9 +190,10 @@ model Metric {
   shares          Int      @default(0)
   comments        Int      @default(0)
   saves           Int      @default(0)
-  watchThroughPct Float    @default(0.0)
+  watchThroughPct Float?
   rootCauseTag    String? // e.g. "hook too slow", "wrong platform fit", "topic saturation"
   fetchedAt       DateTime @default(now())
+  postId          String? // YouTube video id this snapshot was pulled for
 
   @@index([clipId])
   @@index([fetchedAt])

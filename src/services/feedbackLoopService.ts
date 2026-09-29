@@ -49,12 +49,7 @@ export class FeedbackLoopService {
 
     if (metrics.length === 0) return SAMPLE_REPORT;
 
-    const overallWatchThrough = Math.round(
-      metrics.reduce((sum, m) => sum + m.watchThroughPct, 0) / metrics.length
-    );
-    const totalViews = metrics.reduce((sum, m) => sum + m.views, 0);
-
-    // Latest metric per clip+platform, so repeated fetches don't double-count.
+    // Latest snapshot per clip+platform, so repeated syncs don't double-count.
     const latest = new Map<string, (typeof metrics)[number]>();
     for (const m of metrics) {
       if (!m.clip) continue;
@@ -62,24 +57,32 @@ export class FeedbackLoopService {
       if (!latest.has(key)) latest.set(key, m);
     }
     const measured = [...latest.values()];
+    // Watch-through needs YouTube Analytics access; snapshots without it
+    // still count toward views but not toward retention figures.
+    const withRetention = measured.filter((m) => m.watchThroughPct !== null);
+    const watch = (m: (typeof metrics)[number]) => m.watchThroughPct as number;
 
-    const underperformingClips = measured
-      .filter((m) => m.watchThroughPct < UNDERPERFORMING_WATCH_PCT)
-      .sort((a, b) => a.watchThroughPct - b.watchThroughPct)
+    const overallWatchThrough = withRetention.length
+      ? Math.round(withRetention.reduce((sum, m) => sum + watch(m), 0) / withRetention.length)
+      : null;
+
+    const underperformingClips = withRetention
+      .filter((m) => watch(m) < UNDERPERFORMING_WATCH_PCT)
+      .sort((a, b) => watch(a) - watch(b))
       .slice(0, 4)
       .map((m) => ({
         clipTitle: m.clip!.title,
         platform: m.platform,
         views: m.views,
-        watchThrough: Math.round(m.watchThroughPct),
+        watchThrough: Math.round(watch(m)),
         rootCause: m.rootCauseTag || likelyCause(m.clip!),
       }));
 
     const byHook = new Map<string, { total: number; count: number }>();
-    for (const m of measured) {
+    for (const m of withRetention) {
       const hook = m.clip!.hookType || 'other';
       const agg = byHook.get(hook) || { total: 0, count: 0 };
-      agg.total += m.watchThroughPct;
+      agg.total += watch(m);
       agg.count += 1;
       byHook.set(hook, agg);
     }
@@ -95,7 +98,7 @@ export class FeedbackLoopService {
       isSampleData: false,
       overallWatchThrough,
       clipsMeasured: new Set(measured.map((m) => m.clip!.id)).size,
-      totalViews,
+      totalViews: measured.reduce((sum, m) => sum + m.views, 0),
       highPerformingHooks,
       underperformingClips,
       modelWeightAdjustments: null,

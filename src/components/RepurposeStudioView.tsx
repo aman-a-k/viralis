@@ -110,6 +110,8 @@ export function RepurposeStudioView({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [renderRatio, setRenderRatio] = useState<Record<string, string>>({});
   const [startingRender, setStartingRender] = useState<string>('');
+  const [publishing, setPublishing] = useState<string>('');
+  const [privacy, setPrivacy] = useState<'public' | 'unlisted' | 'private'>('unlisted');
   const [url, setUrl] = useState('');
   const [transcript, setTranscript] = useState('');
   const [clipCount, setClipCount] = useState(5);
@@ -547,6 +549,27 @@ export function RepurposeStudioView({
       toast.error('Network error starting the render.', { id: `r-${clip.id}` });
     } finally {
       setStartingRender('');
+    }
+  };
+
+  const publishClip = async (clip: ClipData) => {
+    if (publishing) return;
+    setPublishing(clip.id);
+    toast.loading('Uploading to YouTube…', { id: `p-${clip.id}` });
+    try {
+      const res = await fetch('/api/repurpose/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId: clip.id, privacy }),
+      });
+      const data = await res.json();
+      if (data.success) toast.success('Published to YouTube.', { id: `p-${clip.id}` });
+      else toast.error(data.error || 'Publishing failed.', { id: `p-${clip.id}`, duration: 10000 });
+      onRefresh();
+    } catch {
+      toast.error('Network error while publishing.', { id: `p-${clip.id}` });
+    } finally {
+      setPublishing('');
     }
   };
 
@@ -1034,6 +1057,11 @@ export function RepurposeStudioView({
                     />
                   )}
 
+                  {clip.schedules?.[0]?.status === 'failed' && clip.schedules[0].error && (
+                    <p style={{ fontSize: '0.75rem', color: 'var(--red, #f87171)', display: 'flex', gap: '0.35rem', alignItems: 'flex-start' }}>
+                      <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> Publish failed: {clip.schedules[0].error}
+                    </p>
+                  )}
                   {clip.renderStatus === 'failed' && clip.renderError && (
                     <p style={{ fontSize: '0.75rem', color: 'var(--red, #f87171)', display: 'flex', gap: '0.35rem', alignItems: 'flex-start' }}>
                       <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> Render failed: {clip.renderError}
@@ -1069,6 +1097,36 @@ export function RepurposeStudioView({
                         </button>
                       </div>
                     )}
+                    {clip.videoUrl && clip.renderStatus !== 'rendering' && (() => {
+                      const pub = clip.schedules?.[0];
+                      if (pub?.status === 'published' && pub.postUrl) {
+                        return (
+                          <a href={pub.postUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                            <Check size={13} color="var(--green)" /> Published on YouTube
+                          </a>
+                        );
+                      }
+                      return (
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                          <select
+                            className="input-field"
+                            style={{ width: 104, padding: '0.3rem 0.4rem', fontSize: '0.75rem' }}
+                            aria-label="YouTube visibility"
+                            value={privacy}
+                            disabled={publishing === clip.id}
+                            onChange={(e) => setPrivacy(e.target.value as typeof privacy)}
+                          >
+                            <option value="unlisted">Unlisted</option>
+                            <option value="private">Private</option>
+                            <option value="public">Public</option>
+                          </select>
+                          <button className="btn btn-primary btn-sm" disabled={!!publishing} onClick={() => publishClip(clip)}>
+                            {publishing === clip.id ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={13} />}
+                            {pub?.status === 'failed' ? 'Retry publish' : 'Publish to YouTube'}
+                          </button>
+                        </div>
+                      );
+                    })()}
                     {ytLink && (
                       <a href={ytLink} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
                         <Video size={13} /> Play at {fmt(clip.startTime)}
