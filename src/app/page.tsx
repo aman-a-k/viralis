@@ -4,10 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { VideoData, DashboardStats, SettingsData, AgentStatus, ProjectData } from '@/types';
 import { 
-  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle2, Clock, XCircle, Bot, Zap, 
-  History, LogOut, User as UserIcon, ClipboardCheck, RefreshCw, BarChart2, ChevronRight, 
-  Scissors, Brain, Sparkles, Flame, Sliders, Send, Search, Bell, Command, ChevronDown, 
-  Layers, ExternalLink
+  LayoutDashboard, Video, TrendingUp, Settings, Play, CheckCircle2, Clock, XCircle, Bot, History, LogOut, ClipboardCheck, RefreshCw, ChevronRight, 
+  Scissors, Brain, Sparkles, Flame, ExternalLink
 } from 'lucide-react';
 import { RepurposeStudioView } from '@/components/RepurposeStudioView';
 import { FeedbackLoopView } from '@/components/FeedbackLoopView';
@@ -16,6 +14,7 @@ import { TrendHistoryView } from '@/components/TrendHistoryView';
 import { ApprovalQueueView } from '@/components/ApprovalQueueView';
 import { LandingPage } from '@/components/LandingPage';
 import { SectionErrorBoundary } from '@/components/SectionErrorBoundary';
+import { BrandMark } from '@/components/BrandMark';
 import { signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
@@ -281,51 +280,23 @@ export default function Dashboard() {
 
           {/* Logo Mark */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
-            <div style={{ width: '26px', height: '26px', borderRadius: '7px', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Zap size={15} color="#fff" fill="#fff" />
-            </div>
+            <BrandMark size={26} />
             <span style={{ fontSize: '0.9375rem', fontWeight: 650, letterSpacing: '-0.02em', color: 'var(--text)' }}>
               Viralis
             </span>
           </div>
 
-          <span className="divider-v" />
-
-          {/* Workspace Switcher */}
-          <button type="button" className="btn btn-ghost" style={{ gap: '0.45rem', paddingLeft: '0.4rem', paddingRight: '0.5rem' }}>
-            <span style={{ width: '18px', height: '18px', borderRadius: '5px', background: 'var(--surface-3)', border: '1px solid var(--border-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.625rem', fontWeight: 700, color: 'var(--text-2)' }}>A</span>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 550, color: 'var(--text)' }}>Acme Media Studio</span>
-            <ChevronDown size={13} color="var(--text-3)" />
-          </button>
         </div>
 
-        {/* Center Search */}
-        <div className="header-search">
-          <Search aria-hidden="true" />
-          <input
-            type="text"
-            placeholder="Search or jump to…"
-            aria-label="Search projects, clips, or command"
-          />
-          <kbd>⌘K</kbd>
-        </div>
+        <div style={{ flex: 1 }} />
 
         {/* Right controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span className="badge badge-neutral" style={{ gap: '0.4rem' }}>
-            <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} aria-hidden="true"></span>
-            Pipeline online
-          </span>
-
-          <button type="button" className="icon-btn" aria-label="Notifications">
-            <Bell size={16} />
-          </button>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             {authStatus === 'authenticated' && session?.user?.image ? (
               <img src={session.user.image} alt={session.user.name ? `${session.user.name}'s avatar` : 'Your account'} style={{ width: '26px', height: '26px', borderRadius: '50%', border: '1px solid var(--border-2)' }} />
             ) : (
-              <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: '#b3a4f0' }} aria-hidden="true">
+              <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: 'var(--accent)' }} aria-hidden="true">
                 {session?.user?.name?.[0]?.toUpperCase() || 'U'}
               </div>
             )}
@@ -396,7 +367,7 @@ export default function Dashboard() {
                 {session?.user?.image ? (
                   <img src={session.user.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%', border: '1px solid var(--border-2)' }} />
                 ) : (
-                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: '#b3a4f0', flexShrink: 0 }}>
+                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, color: '#ffb08f', flexShrink: 0 }}>
                     {session?.user?.name?.[0]?.toUpperCase() || 'U'}
                   </div>
                 )}

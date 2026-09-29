@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap');
-
 /* ============================================================
    VIRALIS  ·  Design System
    Restrained dark UI. One accent. Precise spacing. Fast motion.
@@ -26,12 +24,12 @@
   --text-3: #66666f;
 
   /* ---- Accent (single) ---- */
-  --accent: #6e56cf;
-  --accent-hover: #7d68d6;
-  --accent-press: #5d47b8;
-  --accent-fg: #ffffff;
-  --accent-subtle: rgba(110, 86, 207, 0.13);
-  --accent-line: rgba(110, 86, 207, 0.4);
+  --accent: #ff5a1f; /* brand orange */
+  --accent-hover: #ff7440;
+  --accent-press: #e64a12;
+  --accent-fg: #111111; /* dark on orange: 6:1 contrast; white would be 3.3:1 */
+  --accent-subtle: rgba(255, 90, 31, 0.14);
+  --accent-line: rgba(255, 90, 31, 0.45);
 
   /* ---- Semantic ---- */
   --green: #3fb950;
@@ -59,7 +57,7 @@
   --fast: 0.12s var(--ease);
   --med: 0.18s var(--ease);
 
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font: var(--font-manrope), 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
   /* ---- Legacy aliases (existing markup) ---- */
   --background: var(--bg);
@@ -214,7 +212,7 @@ button { font-family: inherit; }
   line-height: 1.35;
   white-space: nowrap;
 }
-.badge-primary { background: var(--accent-subtle); color: #b3a4f0; border-color: var(--accent-line); }
+.badge-primary { background: var(--accent-subtle); color: #ffb08f; border-color: var(--accent-line); }
 .badge-success { background: var(--green-subtle); color: var(--green); border-color: var(--green-line); }
 .badge-warning { background: var(--amber-subtle); color: var(--amber); border-color: var(--amber-line); }
 .badge-danger { background: var(--red-subtle); color: var(--red); border-color: var(--red-line); }
@@ -753,7 +751,7 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
   justify-content: center;
   background: var(--accent-subtle);
   border: 1px solid var(--accent-line);
-  color: #b3a4f0;
+  color: #ffb08f;
 }
 .landing-feature-icon svg { width: 16px; height: 16px; }
 .landing-footer {

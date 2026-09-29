@@ -4,7 +4,8 @@ import React, { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { Zap, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 
 interface Props {
   devLoginAvailable: boolean;
@@ -98,21 +99,8 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
     >
       <div style={{ width: "100%", maxWidth: "400px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1.75rem", justifyContent: "center" }}>
-          <div
-            style={{
-              width: "34px",
-              height: "34px",
-              borderRadius: "10px",
-              background: "var(--gradient-brand)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 0 18px -2px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.25)",
-            }}
-          >
-            <Zap size={18} color="#fff" fill="#fff" />
-          </div>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "1.3rem", fontWeight: 700, letterSpacing: "-0.03em" }}>Viralis</span>
+          <BrandMark size={34} />
+          <span style={{ fontSize: "1.3rem", fontWeight: 700, letterSpacing: "-0.03em" }}>Viralis</span>
         </div>
 
         <div className="panel-card" style={{ padding: "1.75rem" }}>

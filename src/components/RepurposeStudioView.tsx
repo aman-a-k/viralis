@@ -907,7 +907,7 @@ export function RepurposeStudioView({
 
       {projects.length === 0 ? (
         <div className="panel" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
-          <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b3a4f0', margin: '0 auto 0.85rem' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--accent-subtle)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffb08f', margin: '0 auto 0.85rem' }}>
             <Scissors size={20} />
           </div>
           <h3 className="section-title" style={{ marginBottom: '0.3rem' }}>Nothing analyzed yet</h3>
