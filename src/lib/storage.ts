@@ -1,4 +1,4 @@
-import { del, issueSignedToken, presignUrl } from '@vercel/blob';
+import { del, head, issueSignedToken, presignUrl } from '@vercel/blob';
 
 /**
  * Customer media (uploaded recordings and rendered clips) lives in Vercel
@@ -73,7 +73,8 @@ export async function signedReadUrl(stored: string, ttlSeconds = 15 * 60): Promi
   if (/^https?:\/\//.test(stored) && /\.public\.blob\.vercel-storage\.com$/.test(new URL(stored).hostname)) {
     return stored;
   }
-  if (blobAccess() === 'public' && /^https?:\/\//.test(stored)) return stored;
+  if (/^https?:\/\//.test(stored) && blobAccess() === 'public') return stored;
+  if (blobAccess() === 'public') return (await head(stored)).url;
 
   const pathname = blobPathname(stored);
   const validUntil = Date.now() + ttlSeconds * 1000;

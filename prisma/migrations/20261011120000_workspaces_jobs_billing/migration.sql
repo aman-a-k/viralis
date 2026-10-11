@@ -271,6 +271,10 @@ UPDATE "Schedule" SET "workspaceId" = 'ws_legacy' WHERE "workspaceId" IS NULL;
 UPDATE "Metric" SET "workspaceId" = 'ws_legacy' WHERE "workspaceId" IS NULL;
 UPDATE "TrendSignal" SET "workspaceId" = 'ws_legacy' WHERE "workspaceId" IS NULL;
 
+-- Accounts that existed before this release were admitted by allowlist;
+-- treat their addresses as verified so the upgrade doesn't lock them out.
+UPDATE "User" SET "emailVerified" = NOW() WHERE "emailVerified" IS NULL;
+
 -- Clip status "approved" used to mean "sent to the review queue". It now means
 -- a person approved it; "in_review" is the queued state.
 UPDATE "Clip" c SET "status" = 'in_review'
