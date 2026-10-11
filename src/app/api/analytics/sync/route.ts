@@ -1,20 +1,18 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/apiAuth';
-import { syncYouTubeMetrics } from '@/services/youtubeStats';
-import { describeYouTubeError, YouTubeNotConnectedError } from '@/services/youtubePublisher';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse, HttpError } from '@/lib/http';
+import { syncYouTubeMetrics, YouTubeNotConnectedError } from '@/services/youtubeStats';
 
 export const maxDuration = 60;
 
 export async function POST() {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
-    const result = await syncYouTubeMetrics();
+    const ctx = await requireWorkspace();
+    const result = await syncYouTubeMetrics(ctx.workspaceId);
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    console.error('[API /api/analytics/sync]', error);
-    const message = error instanceof YouTubeNotConnectedError ? error.message : describeYouTubeError(error);
-    return NextResponse.json({ success: false, error: message }, { status: error instanceof YouTubeNotConnectedError ? 424 : 500 });
+    if (error instanceof YouTubeNotConnectedError) return errorResponse(new HttpError(424, error.message));
+    if (error instanceof Error) return errorResponse(new HttpError(502, error.message));
+    return errorResponse(error, 'Could not sync metrics.', 'api/analytics/sync');
   }
 }

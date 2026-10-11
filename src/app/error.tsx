@@ -4,10 +4,10 @@ import { useEffect } from "react";
 
 export default function Error({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string };
-  unstable_retry: () => void;
+  retry: () => void;
 }) {
   useEffect(() => {
     console.error(error);
@@ -21,7 +21,7 @@ export default function Error({
           Viralis hit an unexpected error loading this page.
           {error.digest ? ` (ref ${error.digest})` : ""}
         </p>
-        <button type="button" className="btn btn-primary" onClick={() => unstable_retry()}>
+        <button type="button" className="btn btn-primary" onClick={() => retry()}>
           Try again
         </button>
       </div>

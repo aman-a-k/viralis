@@ -1,40 +1,34 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse, HttpError } from '@/lib/http';
 import { runAutomaticDiscovery } from '@/services/automationService';
-import { describeLlmError } from '@/lib/llm';
+import { normalizeConfig, clampClipCount, projectView } from '@/services/pipeline';
 import { MissingYouTubeKeyError } from '@/services/youtubeTrending';
 
-// Discovery + analysis chains several sequential LLM calls; allow up to the
-// Hobby-plan max (Pro/Enterprise allow more via the same export).
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
+    const ctx = await requireWorkspace({ verified: true });
     const body = await req.json().catch(() => ({}));
-    const result = await runAutomaticDiscovery({
-      platforms: body.platforms,
-      orientations: body.orientations,
-      captionStyle: body.captionStyle,
-      clipCount: body.clipCount,
-      region: body.region,
-      category: body.category,
-    });
-
+    const result = await runAutomaticDiscovery(
+      { workspaceId: ctx.workspaceId, userId: ctx.userId, unlimited: ctx.isPlatformAdmin },
+      {
+        ...normalizeConfig(body),
+        clipCount: clampClipCount(body.clipCount),
+        region: typeof body.region === 'string' ? body.region : undefined,
+        category: typeof body.category === 'string' ? body.category : undefined,
+        rightsConfirmed: body.rightsConfirmed === true,
+      }
+    );
     return NextResponse.json({
       success: true,
-      result,
-      message: result.transcribing
-        ? `Picked "${result.video.title}" — transcribing the audio now (can take a few minutes)…`
-        : `Picked "${result.video.title}" — ${result.clipsCreated} clips created, ${result.clipsQueued} queued for approval.`,
+      video: result.video,
+      project: await projectView(ctx.workspaceId, result.projectId),
+      message: `Picked "${result.video.title}". Clips will appear in your review queue when they're ready.`,
     });
-  } catch (error: unknown) {
-    const status = error instanceof MissingYouTubeKeyError ? 424 : 500;
-    return NextResponse.json(
-      { success: false, error: error instanceof MissingYouTubeKeyError ? error.message : describeLlmError(error) },
-      { status }
-    );
+  } catch (error) {
+    if (error instanceof MissingYouTubeKeyError) return errorResponse(new HttpError(503, error.message));
+    return errorResponse(error, 'The automatic run failed. Try again.', 'api/trends/automate');
   }
 }

@@ -1,12 +1,8 @@
 import { prisma } from "./prisma";
 
-// Viralis is a single workspace: every signed-in user shares the same
-// projects, queue, and Settings (including API keys and the connected
-// YouTube account). So new accounts must be invite-only.
-//
-// ALLOWED_EMAILS (comma-separated) lists who may create an account. If it's
-// unset, only the very first account can be created (owner bootstrap) and
-// sign-up closes after that.
+// Each account gets its own isolated workspace, so sign-up is open by
+// default. SIGNUP_MODE=invite restricts it to ALLOWED_EMAILS (plus anyone
+// with a pending workspace invite) — useful for a closed pilot.
 
 function allowlist(): string[] {
   return (process.env.ALLOWED_EMAILS || "")
@@ -15,13 +11,20 @@ function allowlist(): string[] {
     .filter(Boolean);
 }
 
+export function signupMode(): "open" | "invite" {
+  return process.env.SIGNUP_MODE === "invite" ? "invite" : "open";
+}
+
 export async function canCreateAccount(email: string): Promise<boolean> {
-  const list = allowlist();
-  if (list.length) return list.includes(email.trim().toLowerCase());
-  return (await prisma.user.count()) === 0;
+  if (signupMode() === "open") return true;
+  const normalized = email.trim().toLowerCase();
+  if (allowlist().includes(normalized)) return true;
+  const invite = await prisma.invite.findFirst({
+    where: { email: normalized, acceptedAt: null, expiresAt: { gt: new Date() } },
+  });
+  return !!invite;
 }
 
 export async function isSignupOpen(): Promise<boolean> {
-  if (allowlist().length) return true;
-  return (await prisma.user.count()) === 0;
+  return signupMode() === "open" || allowlist().length > 0;
 }

@@ -1,26 +1,30 @@
 import { NextResponse } from 'next/server';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace } from '@/lib/workspace';
+import { getEntitlement } from '@/lib/usage';
+import { sourcePathPrefix } from '@/lib/storage';
 
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-
-// Issues short-lived tokens so the browser can upload a video straight to
-// Vercel Blob — serverless request bodies are capped at 4.5MB, far too small
-// for video. Only signed-in users get a token, and only for media files.
+// Issues a short-lived token so the browser uploads the recording straight to
+// Blob storage (serverless request bodies are capped at 4.5MB). The token is
+// only valid for this workspace's own sources/ folder and the plan's size cap.
 export async function POST(req: Request) {
   const body = (await req.json()) as HandleUploadBody;
-
   try {
     const result = await handleUpload({
       body,
       request: req,
-      onBeforeGenerateToken: async () => {
-        const auth = await requireSession();
-        if (auth instanceof NextResponse) throw new Error('Authentication required.');
+      onBeforeGenerateToken: async (pathname) => {
+        const ctx = await requireWorkspace({ verified: true });
+        if (!pathname.startsWith(sourcePathPrefix(ctx.workspaceId))) {
+          throw new Error('Uploads must go to your own workspace.');
+        }
+        const ent = await getEntitlement(ctx.workspaceId, { unlimited: ctx.isPlatformAdmin });
+        if (ent.source === 'none') throw new Error('Choose a plan to upload recordings.');
         return {
           allowedContentTypes: ['video/*', 'audio/*'],
-          maximumSizeInBytes: MAX_UPLOAD_BYTES,
+          maximumSizeInBytes: ent.plan.maxUploadMb * 1024 * 1024,
           addRandomSuffix: true,
+          validUntil: Date.now() + 60 * 60 * 1000,
         };
       },
     });

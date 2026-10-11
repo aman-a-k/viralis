@@ -9,20 +9,24 @@ datasource db {
 }
 
 model Video {
-  id        String   @id @default(cuid())
-  topic     String
-  videoUrl  String
-  views     Int      @default(0)
-  likes     Int      @default(0)
-  platform  String // "youtube", "instagram", "both"
-  status    String // "success", "failed", "pending"
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  topic       String
+  videoUrl    String
+  views       Int       @default(0)
+  likes       Int       @default(0)
+  platform    String // "youtube", "instagram", "both"
+  status      String // "success", "failed", "pending"
+  createdAt   DateTime  @default(now())
 
-  @@index([createdAt])
+  @@index([workspaceId, createdAt])
 }
 
 model ApprovalQueue {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   topic           String
   script          String
   visualPrompts   String // JSON
@@ -30,9 +34,9 @@ model ApprovalQueue {
   seoTitle        String?
   seoDescription  String?
   seoTags         String? // JSON
-  status          String   @default("pending") // "pending", "approved", "rejected"
+  status          String    @default("pending") // "pending", "approved", "rejected"
   rejectionReason String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   // Links back to the repurposed Clip this entry came from (unset for
   // Autopilot-generated scripts, which have no source clip to cut).
@@ -40,33 +44,42 @@ model ApprovalQueue {
   renderStatus String? // null | "pending" | "rendering" | "rendered" | "failed"
   renderError  String?
 
-  @@index([status, createdAt])
+  @@index([workspaceId, status, createdAt])
   @@index([clipId])
 }
 
 model Trend {
-  id        String   @id @default(cuid())
-  topic     String
-  score     Int
-  keywords  String // JSON stringified array
-  isViable  Boolean  @default(true)
-  analysis  String?
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  topic       String
+  score       Int
+  keywords    String // JSON stringified array
+  isViable    Boolean   @default(true)
+  analysis    String?
+  createdAt   DateTime  @default(now())
 
-  @@index([createdAt])
+  @@index([workspaceId, createdAt])
 }
 
 model Analytics {
-  id                String   @id @default(cuid())
-  totalViews        Int      @default(0)
-  totalRevenue      Float    @default(0.0)
-  engagementRate    Float    @default(0.0)
-  subscribersGained Int      @default(0)
-  lastUpdated       DateTime @default(now())
+  id                String    @id @default(cuid())
+  workspaceId       String    @unique
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  totalViews        Int       @default(0)
+  totalRevenue      Float     @default(0.0)
+  engagementRate    Float     @default(0.0)
+  subscribersGained Int       @default(0)
+  lastUpdated       DateTime  @default(now())
 }
 
+// Per-workspace brand + output preferences. The AI provider keys and Google
+// OAuth client columns are legacy (single-tenant era): the platform now
+// supplies those centrally from env, and nothing reads them anymore.
 model Settings {
-  id          String  @id @default("default")
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   youtubeId   String?
   instagramId String?
   openAiKey   String? // legacy — see aiApiKey
@@ -110,102 +123,147 @@ model Settings {
   videoStyle      String? @default("Cinematic Stock") // "Cinematic Stock", "AI Art Transitions"
   captionStyle    String? @default("Dynamic Pop") // "Dynamic Pop" (Hormozi style), "Minimalist"
   backgroundMusic String? @default("Trending Beats")
+
+  // Spoken language of most of this workspace's recordings ("auto" = detect).
+  defaultLanguage String? @default("auto")
 }
 
 // Viralis Core Models (Repurposing & Self-Optimizing Distribution)
 model Project {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById     String?
   title           String
-  sourceVideoUrl  String?
+  sourceVideoUrl  String? // YouTube URL, or legacy public blob URL
+  sourceBlobPath  String? // private blob pathname for uploads (never sent to the browser)
   sourceVideoId   String? // YouTube video id when sourceType == "youtube"
-  sourceType      String   @default("upload") // "upload", "youtube", "drive", "zoom"
+  sourceType      String    @default("upload") // "upload", "youtube", "drive", "zoom"
   channel         String?
   thumbnail       String?
   transcript      String? // Full caption transcript text
   transcriptJson  String? // JSON array of { text, start, end }
-  duration        Float?   @default(0)
-  status          String   @default("ready") // "processing", "transcribing", "ready", "failed"
+  duration        Float?    @default(0)
+  language        String?   @default("auto")
+  // "queued" | "transcribing" | "analyzing" | "ready" | "failed" ("processing" = legacy)
+  status          String    @default("ready")
+  stage           String? // human-readable progress, e.g. "Transcribing audio"
+  rightsConfirmed Boolean   @default(false)
   errorMessage    String?
   transcriptJobId String? // worker job id while status == "transcribing"
   metadata        String? // JSON string
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   clips           Clip[]
+  jobs            Job[]
 
-  @@index([createdAt])
+  @@index([workspaceId, createdAt])
   @@index([status])
 }
 
 model Clip {
-  id                String     @id @default(cuid())
+  id                String    @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectId         String
-  project           Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title             String
   startTime         Float
   endTime           Float
   duration          Float
-  viralityScore     Int        @default(85)
+  viralityScore     Int       @default(85)
   reasoning         String
   hookType          String?
-  aspectRatios      String     @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
+  aspectRatios      String    @default("[\"9:16\",\"1:1\",\"16:9\"]") // JSON
   transcriptSegment String
   captionVersions   String // JSON: { "instagram": "...", "youtube": "...", "linkedin": "...", "twitter": "...", "tiktok": "..." }
-  videoUrl          String?
-  renderStatus      String? // null | "rendering" | "rendered" | "failed"
-  renderJobId       String? // worker job id while rendering
+  videoUrl          String? // legacy public URL; new renders use renderBlobPath
+  renderBlobPath    String? // private blob pathname of the latest render
+  renderStatus      String? // null | "queued" | "rendering" | "rendered" | "failed"
+  renderJobId       String? // Job.id while rendering
   renderError       String?
-  status            String     @default("candidate") // "candidate", "approved", "scheduled", "published", "rejected"
-  createdAt         DateTime   @default(now())
-  schedules         Schedule[]
-  metrics           Metric[]
+  renderedAspect    String?
+  // "candidate" -> "in_review" -> "approved" -> "published"; or "rejected"
+  status            String    @default("candidate")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  // Editor state. captionWords overrides the transcript's words for this
+  // clip: JSON [{ "w": string, "s": seconds, "e": seconds }] (absolute times).
+  captionWords           String?
+  cropX                  Float   @default(0.5) // horizontal focus, 0 = left edge, 1 = right
+  layout                 String  @default("fill") // "fill" (crop to frame) | "fit" (letterbox on blurred bg)
+  captionPosition        String  @default("bottom") // "top" | "middle" | "bottom"
+  captionStyle           String  @default("Dynamic Pop")
+  // Publishing metadata (editable before publish)
+  publishTitle           String?
+  publishDescription     String?
+  publishTags            String? // JSON string[]
+  madeForKids            Boolean @default(false)
+  containsSyntheticMedia Boolean @default(false)
+
+  schedules Schedule[]
+  metrics   Metric[]
 
   @@index([projectId])
-  @@index([status])
+  @@index([workspaceId, status])
 }
 
 model Schedule {
   id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   clipId        String?
   clip          Clip?     @relation(fields: [clipId], references: [id], onDelete: Cascade)
   platform      String // "instagram", "youtube", "linkedin", "twitter", "tiktok"
   scheduledTime DateTime
   publishedTime DateTime?
-  status        String    @default("pending") // "pending", "published", "failed"
+  status        String    @default("pending") // "publishing", "published", "failed"
   postId        String?
   postUrl       String?
   error         String?
+  // Set to "<clipId>:<platform>" while publishing/published so a concurrent
+  // or retried publish of the same clip can't create a second upload.
+  lockKey       String?   @unique
   createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   @@index([clipId])
-  @@index([status])
+  @@index([workspaceId, status])
 }
 
 model Metric {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   clipId          String?
-  clip            Clip?    @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  clip            Clip?     @relation(fields: [clipId], references: [id], onDelete: Cascade)
   platform        String
-  views           Int      @default(0)
-  likes           Int      @default(0)
-  shares          Int      @default(0)
-  comments        Int      @default(0)
-  saves           Int      @default(0)
+  views           Int       @default(0)
+  likes           Int       @default(0)
+  shares          Int       @default(0)
+  comments        Int       @default(0)
+  saves           Int       @default(0)
   watchThroughPct Float?
   rootCauseTag    String? // e.g. "hook too slow", "wrong platform fit", "topic saturation"
-  fetchedAt       DateTime @default(now())
+  fetchedAt       DateTime  @default(now())
   postId          String? // YouTube video id this snapshot was pulled for
 
-  @@index([clipId])
-  @@index([fetchedAt])
+  @@index([clipId, platform, fetchedAt])
+  @@index([workspaceId, fetchedAt])
 }
 
 model TrendSignal {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   niche         String
   topic         String
-  trendingScore Int      @default(80)
+  trendingScore Int       @default(80)
   format        String? // e.g. "contrarian debate", "breakdown", "hook question"
-  detectedAt    DateTime @default(now())
+  detectedAt    DateTime  @default(now())
+
+  @@index([workspaceId])
 }
 
 // NextAuth Models
@@ -240,14 +298,16 @@ model Session {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String?
-  email         String?   @unique
+  email         String?      @unique
   emailVerified DateTime?
   image         String?
   passwordHash  String?
+  createdAt     DateTime     @default(now())
   accounts      Account[]
   sessions      Session[]
+  memberships   Membership[]
 }
 
 model VerificationToken {
@@ -256,4 +316,211 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// ─── Tenancy ───────────────────────────────────────────────────────────────
+
+model Workspace {
+  id            String   @id @default(cuid())
+  name          String
+  // Days to keep uploaded sources and renders before automatic deletion.
+  retentionDays Int      @default(30)
+  // Eligible for the one-time trial allowance (personal workspaces created
+  // at sign-up). The trial is counted over the workspace's whole lifetime.
+  trialGranted  Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships  Membership[]
+  invites      Invite[]
+  settings     Settings?
+  analytics    Analytics?
+  projects     Project[]
+  clips        Clip[]
+  approvals    ApprovalQueue[]
+  trends       Trend[]
+  videos       Video[]
+  schedules    Schedule[]
+  metrics      Metric[]
+  trendSignals TrendSignal[]
+  channels     ChannelConnection[]
+  jobs         Job[]
+  subscription Subscription?
+  usage        UsageEntry[]
+  auditEvents  AuditEvent[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String    @default("member") // "owner" | "admin" | "member"
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  email       String
+  role        String    @default("member")
+  tokenHash   String    @unique
+  invitedById String?
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// A publishing destination connected through the platform's own Google
+// OAuth app. Tokens are encrypted at rest (see lib/crypto.ts).
+model ChannelConnection {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  provider              String    @default("youtube")
+  externalId            String? // YouTube channel id
+  title                 String?
+  refreshTokenEnc       String
+  scopes                String?
+  // Legacy installs connected with their own Google Cloud client; kept so
+  // those connections keep working until reconnected via the platform app.
+  legacyClientId        String?
+  legacyClientSecretEnc String?
+  status                String    @default("active") // "active" | "revoked" | "error"
+  lastError             String?
+  connectedById         String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider])
+}
+
+// ─── Durable jobs ──────────────────────────────────────────────────────────
+
+// Work for the media worker ("transcribe", "render") or the app itself
+// ("analyze"). Claimed with a lease, so a worker restart only delays a job
+// until its lease expires — it is then picked up again.
+model Job {
+  id          String    @id @default(cuid())
+  workspaceId String
+  type        String // "transcribe" | "render" | "analyze"
+  status      String    @default("queued") // "queued" | "running" | "succeeded" | "failed" | "canceled"
+  payload     String // JSON
+  result      String? // JSON
+  progress    String? // short stage label for the UI
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAfter    DateTime  @default(now())
+  leaseUntil  DateTime?
+  lockedBy    String?
+  projectId   String?
+  clipId      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([status, type, runAfter])
+  @@index([workspaceId, createdAt])
+  @@index([projectId])
+  @@index([clipId])
+}
+
+// ─── Billing & usage ───────────────────────────────────────────────────────
+
+model Subscription {
+  id                     String    @id @default(cuid())
+  workspaceId            String    @unique
+  provider               String    @default("razorpay")
+  providerSubscriptionId String    @unique
+  providerCustomerId     String?
+  planId                 String // key in lib/plans.ts
+  // Mirrors the provider: "created" | "authenticated" | "active" | "pending"
+  // | "halted" | "cancelled" | "completed" | "expired" | "paused"
+  status                 String
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// Every verified provider webhook, recorded once (eventId is unique), so
+// duplicate deliveries are no-ops.
+model BillingEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String   @unique
+  type        String
+  payload     String
+  processedAt DateTime @default(now())
+}
+
+// Usage is reserved before work starts, committed on success and released on
+// failure, so concurrent requests can't overspend an allowance.
+model UsageEntry {
+  id          String    @id @default(cuid())
+  workspaceId String
+  metric      String // "source_seconds" | "exports"
+  amount      Int
+  status      String    @default("reserved") // "reserved" | "committed" | "released"
+  refType     String? // "project" | "clip"
+  refId       String?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, metric, createdAt])
+  @@index([refType, refId])
+}
+
+// ─── Security & audit ──────────────────────────────────────────────────────
+
+model AuditEvent {
+  id          String     @id @default(cuid())
+  workspaceId String?
+  userId      String?
+  action      String
+  detail      String?
+  ip          String?
+  createdAt   DateTime   @default(now())
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  key       String // "email:<addr>" or "ip:<addr>"
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
+// Single-use tokens for email verification and password reset. Only a
+// SHA-256 hash of the token is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  purpose   String // "verify_email" | "reset_password"
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
 }

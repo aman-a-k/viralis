@@ -68,11 +68,11 @@ export interface RefreshResult {
  * provider is unavailable the raw trends are still saved (scored by search
  * volume) rather than the whole refresh failing.
  */
-export async function refreshTrendRadar(opts: { geo?: string } = {}): Promise<RefreshResult> {
+export async function refreshTrendRadar(workspaceId: string, opts: { geo?: string } = {}): Promise<RefreshResult> {
   const trends = (await fetchGoogleTrends(opts.geo)).slice(0, 15);
   if (trends.length === 0) return { saved: 0, scored: false, note: 'Google Trends returned no topics for this region.' };
 
-  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+  const settings = await prisma.settings.findUnique({ where: { workspaceId } });
   const niche = settings?.brandNiche || 'general audience';
 
   type Scored = { index: number; score: number; viable: boolean; angle: string; keywords: string[] };
@@ -108,6 +108,7 @@ Return JSON: {"trends":[{"index":number,"score":number,"viable":boolean,"angle":
   const rows = trends.map((t, i) => {
     const s = byIndex.get(i);
     return {
+      workspaceId,
       topic: t.title.slice(0, 200),
       score: s ? Math.max(0, Math.min(100, Math.round(Number(s.score) || 0))) : Math.round((t.trafficEstimate / maxTraffic) * 100),
       keywords: JSON.stringify(Array.isArray(s?.keywords) ? s!.keywords.slice(0, 5) : [t.title]),

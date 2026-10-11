@@ -1,47 +1,29 @@
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
-import { google } from 'googleapis';
-import { prisma } from '@/lib/prisma';
-import { requireSession } from '@/lib/apiAuth';
+import { getWorkspaceContext } from '@/lib/workspace';
+import { platformOAuthClient, platformOAuthConfigured, YOUTUBE_SCOPES } from '@/services/youtubeConnection';
 
 const YT_OAUTH_STATE_COOKIE = 'yt_oauth_state';
 
+/** Starts connecting the workspace's YouTube channel through the platform's Google app. */
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) {
-    return NextResponse.redirect(`${url.origin}/auth/signin`);
-  }
-
-  const redirectUri = `${url.origin}/api/auth/youtube/callback`;
-
-  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-
-  if (!settings || !settings.youtubeClientId || !settings.youtubeClientSecret) {
-    return NextResponse.json({ error: "Missing YouTube Client ID and Secret in settings." }, { status: 400 });
-  }
-
-  const oauth2Client = new google.auth.OAuth2(
-    settings.youtubeClientId,
-    settings.youtubeClientSecret,
-    redirectUri
-  );
+  const ctx = await getWorkspaceContext();
+  if (!ctx) return NextResponse.redirect(`${url.origin}/auth/signin`);
+  if (ctx.role === 'member') return NextResponse.redirect(`${url.origin}/?tab=settings&error=youtube_permission`);
+  if (!platformOAuthConfigured()) return NextResponse.redirect(`${url.origin}/?tab=settings&error=youtube_unavailable`);
 
   const state = randomBytes(32).toString('hex');
-
-  const authUrl = oauth2Client.generateAuthUrl({
+  const authUrl = platformOAuthClient(`${url.origin}/api/auth/youtube/callback`).generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
+    include_granted_scopes: true,
     state,
-    scope: [
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly',
-      'https://www.googleapis.com/auth/yt-analytics.readonly',
-    ],
+    scope: YOUTUBE_SCOPES,
   });
 
   const res = NextResponse.redirect(authUrl);
-  res.cookies.set(YT_OAUTH_STATE_COOKIE, state, {
+  res.cookies.set(YT_OAUTH_STATE_COOKIE, `${state}.${ctx.workspaceId}`, {
     httpOnly: true,
     secure: url.protocol === 'https:',
     sameSite: 'lax',
@@ -49,4 +31,16 @@ export async function GET(req: Request) {
     maxAge: 10 * 60,
   });
   return res;
+}
+
+/** Disconnects (and revokes) the workspace's channel. */
+export async function DELETE() {
+  const ctx = await getWorkspaceContext();
+  if (!ctx) return NextResponse.json({ success: false, error: 'Sign in to continue.' }, { status: 401 });
+  if (ctx.role === 'member') return NextResponse.json({ success: false, error: 'Ask a workspace admin to do that.' }, { status: 403 });
+  const { disconnect } = await import('@/services/youtubeConnection');
+  const { audit } = await import('@/lib/workspace');
+  await disconnect(ctx.workspaceId);
+  await audit(ctx, 'channel.disconnect', { provider: 'youtube' });
+  return NextResponse.json({ success: true });
 }

@@ -1,14 +1,46 @@
-version: '3.8'
-
+# Self-hosted stack: Postgres + web app + media worker.
+#   cp .env.example .env   (fill it in; DATABASE_URL is set below)
+#   docker compose up --build
+# Media is still stored in Vercel Blob (BLOB_READ_WRITE_TOKEN).
 services:
-  automator:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: viralis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: viralis
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U viralis"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
     build: .
-    container_name: ai_automator_prod
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://viralis:${POSTGRES_PASSWORD:-change-me}@db:5432/viralis
+      DIRECT_URL: postgresql://viralis:${POSTGRES_PASSWORD:-change-me}@db:5432/viralis
+      RENDER_WORKER_URL: http://worker:8080
     ports:
       - "3000:3000"
-    volumes:
-      - ./dev.db:/app/dev.db
-      - ./public/renders:/app/public/renders
-    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./worker
     environment:
-      - NODE_ENV=production
+      APP_URL: http://app:3000
+      WORKER_SECRET: ${RENDER_WORKER_SECRET}
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN}
+      BLOB_ACCESS: ${BLOB_ACCESS:-private}
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:

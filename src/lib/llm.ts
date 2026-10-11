@@ -1,10 +1,9 @@
 import OpenAI from 'openai';
-import { prisma } from './prisma';
 
 /**
- * Viralis talks to any OpenAI-compatible chat API. Pick a provider with
- * AI_PROVIDER (or the workspace Settings). All three of these expose a free
- * tier or free key:
+ * Viralis talks to any OpenAI-compatible chat API. The provider and key are
+ * platform configuration (AI_PROVIDER + the provider's key env var) —
+ * customers never need an AI account. Supported:
  *
  *   gemini  — Google AI Studio key, no card, generous free tier   (recommended)
  *   groq    — Groq key, no card, very fast Llama models
@@ -45,9 +44,8 @@ export const PROVIDERS: Record<AiProvider, ProviderConfig> = {
 
 export class MissingApiKeyError extends Error {
   constructor(public provider: AiProvider) {
-    super(
-      `No API key for ${PROVIDERS[provider].label}. Add one in Settings (get a free key at ${PROVIDERS[provider].getKeyUrl}).`
-    );
+    super('The AI service isn’t configured on this server yet. Please contact support.');
+    console.error(`[llm] ${PROVIDERS[provider].keyEnv} is not set (get a key at ${PROVIDERS[provider].getKeyUrl}).`);
     this.name = 'MissingApiKeyError';
   }
 }
@@ -63,25 +61,19 @@ function normalizeProvider(v: string | null | undefined): AiProvider {
   return p === 'gemini' || p === 'groq' || p === 'openai' ? p : 'openai';
 }
 
-/** Resolve the AI provider + key from workspace Settings, falling back to env. */
-export async function getLlmClient(): Promise<LlmClient> {
-  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+export function aiConfigured(): boolean {
+  const provider = normalizeProvider(process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'openai'));
+  return Boolean(process.env[PROVIDERS[provider].keyEnv]);
+}
 
+/** The platform's AI client, from env. */
+export async function getLlmClient(): Promise<LlmClient> {
   const provider = normalizeProvider(
-    settings?.aiProvider || process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'openai')
+    process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'openai')
   );
   const cfg = PROVIDERS[provider];
-
-  const key =
-    settings?.aiApiKey ||
-    settings?.openAiKey || // legacy field
-    process.env[cfg.keyEnv] ||
-    process.env.OPENAI_API_KEY ||
-    '';
-
+  const key = process.env[cfg.keyEnv] || '';
   if (!key) throw new MissingApiKeyError(provider);
-
-  const model = settings?.aiModel || process.env.AI_MODEL || cfg.defaultModel;
 
   return {
     client: new OpenAI({
@@ -90,7 +82,7 @@ export async function getLlmClient(): Promise<LlmClient> {
       maxRetries: 4, // SDK backs off on 429/503
       timeout: 60_000,
     }),
-    model,
+    model: process.env.AI_MODEL || cfg.defaultModel,
     provider,
   };
 }
@@ -101,11 +93,12 @@ export function describeLlmError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   const has = (code: number) => status === code || new RegExp(`\\b${code}\\b`).test(msg);
 
-  if (has(429))
-    return "The AI provider hit its rate/quota limit. Free tiers allow ~10–15 requests/min and a daily cap — wait a bit, or switch provider in Settings.";
-  if (has(503) || has(500))
-    return 'The AI provider is temporarily overloaded. Try again in a moment.';
-  if (has(401) || has(403))
-    return 'The AI API key was rejected. Check it in Settings.';
+  if (err instanceof MissingApiKeyError) return err.message;
+  if (has(429)) return 'Our AI service is busy right now. Try again in a minute.';
+  if (has(503) || has(500)) return 'The AI service is temporarily overloaded. Try again in a moment.';
+  if (has(401) || has(403)) {
+    console.error('[llm] provider rejected the API key:', msg);
+    return 'The AI service is unavailable right now. Please contact support if this continues.';
+  }
   return msg || 'AI request failed.';
 }

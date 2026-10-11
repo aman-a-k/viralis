@@ -142,7 +142,19 @@ export function FeedbackLoopView() {
   };
 
   useEffect(() => {
-    fetchLoopData();
+    let cancelled = false;
+    fetch('/api/analytics/loop')
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.success) setFeedbackData(json.report);
+        else setFailed(true);
+      })
+      .catch(() => !cancelled && setFailed(true))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const syncNow = async () => {

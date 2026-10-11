@@ -7,8 +7,8 @@ import { Providers } from "@/components/Providers";
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Viralis — Go Viral, On Autopilot | AI Video Repurposing & Distribution",
-  description: "Viralis turns one long video into ready-to-post vertical clips: it finds the best moments, adds captions, publishes to YouTube, and learns what works. Go viral, on autopilot.",
+  title: "Viralis — Turn recordings into captioned clips",
+  description: "Upload a lesson, webinar or talk. Viralis finds the strongest standalone moments and gives you editable, captioned vertical clips to download or publish — in English, Hindi, Kannada and more.",
 };
 
 export default function RootLayout({

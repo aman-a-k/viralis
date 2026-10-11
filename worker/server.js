@@ -1,54 +1,53 @@
-// Viralis render worker.
+// Viralis media worker.
 //
-// Standalone service (deployed separately — e.g. Render — because Vercel's
-// serverless functions can't run ffmpeg/yt-dlp or hold a job open long
-// enough). Two kinds of background job, both fire-and-poll because they
-// routinely outlast any single HTTP request on a free-tier CPU:
+// Runs separately from the Next.js app (Vercel functions can't run ffmpeg,
+// yt-dlp or whisper, or hold a job for minutes). It pulls work from the app:
 //
-// - Transcription: gets the audio (from YouTube via yt-dlp, or straight from
-//   an uploaded file) and transcribes it with whisper.cpp.
-// - Rendering: cuts a clip's time range, reframes it, burns captions with
-//   ffmpeg, and uploads the result to Vercel Blob.
+//   POST {APP_URL}/api/worker/claim              -> next job (or null)
+//   POST {APP_URL}/api/worker/jobs/:id           -> heartbeat | complete | fail
 //
-// Sources are either a YouTube URL or a `mediaUrl` for a file the user
-// uploaded to this app's Vercel Blob store. Uploaded files don't touch
-// YouTube at all, so they keep working even when YouTube is blocking this
-// server's IP.
+// Jobs live in the app's database with a lease. The worker heartbeats while
+// it works; if it crashes or is redeployed, the lease lapses and the job is
+// handed out again — nothing is lost with the process.
 //
-// Auth: every request must carry `Authorization: Bearer <WORKER_SECRET>`
-// matching the WORKER_SECRET env var here (same value goes into the Next.js
-// app's RENDER_WORKER_SECRET).
+// Job types:
+//   transcribe: audio from an uploaded file (signed URL) or YouTube (yt-dlp)
+//               -> whisper.cpp with word-level timestamps, any language.
+//   render:     cut + reframe + burn the app-supplied caption cues -> upload
+//               to Blob storage under the workspace's renders/ prefix.
+//
+// Auth: every call to the app carries `Authorization: Bearer <WORKER_SECRET>`
+// (the app's RENDER_WORKER_SECRET). The app calls POST /wake with the same
+// secret to make the worker claim immediately instead of on its next poll.
 
 import express from 'express';
 import { put } from '@vercel/blob';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile, readFile, readdir, rm, copyFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtemp, writeFile, readFile, readdir, rm, copyFile, stat } from 'node:fs/promises';
+import { existsSync, createReadStream } from 'node:fs';
+import { tmpdir, hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { groupWords, buildAss, describeWorkerError } from './media.js';
 
 const execFileAsync = promisify(execFile);
-const app = express();
-app.use(express.json({ limit: '2mb' }));
 
 const PORT = process.env.PORT || 8080;
+const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 const WORKER_SECRET = process.env.WORKER_SECRET || '';
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const BLOB_ACCESS = process.env.BLOB_ACCESS === 'public' ? 'public' : 'private';
 const WHISPER_BIN = process.env.WHISPER_BIN || 'whisper-cli';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
+const WHISPER_THREADS = String(process.env.WHISPER_THREADS || 2);
+const IDLE_POLL_MS = Number(process.env.IDLE_POLL_MS || 60_000);
+const HEARTBEAT_MS = 30_000;
+const WORKER_ID = `${hostname()}-${randomUUID().slice(0, 8)}`;
 
-// A YouTube cookies.txt (Netscape format), added as a Render "Secret File".
-// Anonymous requests from cloud IPs are blocked outright; authenticated ones
-// get a separate, much higher rate limit. Optional — falls back to anonymous
-// (and will likely fail) if not present, so local/dev keeps working.
-//
-// Render mounts secret files read-only, but yt-dlp rewrites its cookie jar
-// after every use (Google rotates session cookies as a security measure) —
-// so the secret is copied once, at startup, to a writable path. That copy
-// then self-maintains its own rotation across requests for as long as this
-// instance stays up.
+// See the Dockerfile: YouTube blocks anonymous downloads from cloud IPs, so a
+// cookies.txt can be mounted as a secret file. It's copied to a writable
+// path because yt-dlp rewrites the jar as Google rotates session cookies.
 const SECRET_COOKIES_PATH = '/etc/secrets/yt-cookies.txt';
 const COOKIES_PATH = path.join(tmpdir(), 'yt-cookies-writable.txt');
 if (existsSync(SECRET_COOKIES_PATH)) {
@@ -56,99 +55,221 @@ if (existsSync(SECRET_COOKIES_PATH)) {
   console.log('[startup] copied yt-cookies.txt to a writable path for yt-dlp');
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-function checkAuth(req, res) {
-  if (!WORKER_SECRET) {
-    res.status(500).json({ success: false, error: 'WORKER_SECRET is not set on the worker.' });
-    return false;
-  }
-  const auth = req.header('authorization') || '';
-  if (auth !== `Bearer ${WORKER_SECRET}`) {
-    res.status(401).json({ success: false, error: 'Unauthorized.' });
-    return false;
-  }
-  return true;
+for (const [name, value] of Object.entries({ APP_URL, WORKER_SECRET, BLOB_READ_WRITE_TOKEN: BLOB_TOKEN, WHISPER_MODEL })) {
+  if (!value) console.warn(`[startup] ${name} is not set — jobs that need it will fail.`);
 }
 
-// --- Shared job plumbing ---------------------------------------------------
+// --- Talking to the app -----------------------------------------------------
 
-// Uploaded sources live in this app's Vercel Blob store. Only those are ever
-// fetched — the worker must not be usable to pull arbitrary URLs.
-function isAllowedMediaUrl(value) {
+async function callApp(pathname, body, timeoutMs = 30_000) {
+  const res = await fetch(`${APP_URL}${pathname}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${WORKER_SECRET}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workerId: WORKER_ID, ...body }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+const report = (jobId, body) => callApp(`/api/worker/jobs/${encodeURIComponent(jobId)}`, body, 60_000);
+
+/** Thrown when the app says this worker no longer holds the job. */
+class LeaseLost extends Error {}
+
+function startHeartbeat(jobId, state) {
+  const timer = setInterval(async () => {
+    try {
+      const { status } = await report(jobId, { action: 'heartbeat', progress: state.progress });
+      if (status === 409) state.leaseLost = true;
+    } catch {
+      /* transient; the lease is long enough to survive a missed beat */
+    }
+  }, HEARTBEAT_MS);
+  return () => clearInterval(timer);
+}
+
+// --- Main loop: one heavy job at a time -------------------------------------
+// whisper and a 1080p encode each want most of a small instance's memory.
+
+let busy = false;
+let wakeRequested = false;
+let shuttingDown = false;
+let currentJob = null;
+
+async function loop() {
+  if (busy || shuttingDown || !APP_URL || !WORKER_SECRET) return;
+  busy = true;
   try {
-    const u = new URL(value);
-    return u.protocol === 'https:' && u.hostname.endsWith('.public.blob.vercel-storage.com');
-  } catch {
-    return false;
-  }
-}
-
-// whisper.cpp and a 1080p encode each want most of the free tier's 512MB, so
-// heavy jobs run one at a time instead of OOM-killing each other.
-let heavyQueue = Promise.resolve();
-function runExclusive(fn) {
-  const run = heavyQueue.then(fn, fn);
-  heavyQueue = run.catch(() => {});
-  return run;
-}
-
-// Jobs live in memory only — lost on a restart/redeploy, which the app
-// reports as "interrupted" so the user can retry.
-const JOB_RETENTION_MS = 60 * 60 * 1000;
-function createJobStore() {
-  const jobs = new Map();
-  return {
-    create() {
-      const now = Date.now();
-      for (const [id, job] of jobs) {
-        if (job.status !== 'processing' && now - job.updatedAt > JOB_RETENTION_MS) jobs.delete(id);
+    for (;;) {
+      wakeRequested = false;
+      let job = null;
+      try {
+        const { status, data } = await callApp('/api/worker/claim', {}, 60_000);
+        if (status !== 200) {
+          console.warn(`[claim] app returned HTTP ${status}`);
+          break;
+        }
+        job = data.job;
+      } catch (err) {
+        console.warn('[claim] app unreachable:', err?.message || err);
+        break;
       }
-      const id = randomUUID();
-      jobs.set(id, { status: 'processing', updatedAt: now });
-      return id;
-    },
-    set(id, data) {
-      jobs.set(id, { ...data, updatedAt: Date.now() });
-    },
-    get(id) {
-      return jobs.get(id);
-    },
-  };
-}
-
-function sourceFromBody(body) {
-  const { youtubeUrl, mediaUrl } = body || {};
-  if (mediaUrl) {
-    if (!isAllowedMediaUrl(mediaUrl)) return { error: 'mediaUrl must be a file in this app\'s Vercel Blob storage.' };
-    return { mediaUrl };
+      if (!job) {
+        if (wakeRequested) continue;
+        break;
+      }
+      await runJob(job);
+      if (shuttingDown) break;
+    }
+  } finally {
+    busy = false;
   }
-  if (youtubeUrl) return { youtubeUrl };
-  return { error: 'youtubeUrl or mediaUrl is required.' };
 }
 
-// --- Rendering (background job) --------------------------------------------
+async function runJob(job) {
+  const tag = `[${job.type} ${job.jobId} #${job.attempt}]`;
+  const state = { progress: 'Starting', leaseLost: false };
+  currentJob = job;
+  const stopHeartbeat = startHeartbeat(job.jobId, state);
+  const setProgress = (p) => {
+    state.progress = p;
+    console.log(`${tag} ${p}`);
+    if (state.leaseLost) throw new LeaseLost();
+  };
+  try {
+    const result = job.type === 'transcribe' ? await transcribe(job, setProgress) : await renderClip(job, setProgress);
+    if (state.leaseLost) throw new LeaseLost();
+    const { status } = await report(job.jobId, { action: 'complete', result });
+    if (status === 409) console.warn(`${tag} finished, but the job had been reassigned — result discarded.`);
+    else console.log(`${tag} done`);
+  } catch (err) {
+    if (err instanceof LeaseLost) {
+      console.warn(`${tag} lease lost; dropping job.`);
+    } else {
+      const { message, retryable } = describeWorkerError(err, job.type);
+      console.error(`${tag} failed:`, err?.stderr?.toString?.().slice(-2000) || err?.message || err);
+      await report(job.jobId, { action: 'fail', error: message, retryable }).catch(() => {});
+    }
+  } finally {
+    stopHeartbeat();
+    currentJob = null;
+  }
+}
 
-const renderJobs = createJobStore();
+setInterval(() => loop().catch((e) => console.error('[loop]', e)), IDLE_POLL_MS);
+setTimeout(() => loop().catch((e) => console.error('[loop]', e)), 2_000);
 
-async function renderClip({ youtubeUrl, mediaUrl, startTime, endTime, aspectRatio, captionText, captionStyle, clipId }) {
-  const duration = Math.min(90, endTime - startTime);
-  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-'));
+// --- HTTP: health + wake ----------------------------------------------------
+
+const app = express();
+app.get('/health', (_req, res) => res.json({ ok: true, busy, worker: WORKER_ID }));
+app.post('/wake', (req, res) => {
+  if (!WORKER_SECRET || req.header('authorization') !== `Bearer ${WORKER_SECRET}`) {
+    return res.status(401).json({ ok: false });
+  }
+  wakeRequested = true;
+  loop().catch((e) => console.error('[loop]', e));
+  res.json({ ok: true, busy });
+});
+const server = app.listen(PORT, () => console.log(`Viralis worker ${WORKER_ID} listening on :${PORT}`));
+
+// On redeploy, hand the current job back right away (as retryable) instead
+// of waiting for its lease to lapse.
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal}`);
+  server.close();
+  if (currentJob) {
+    await report(currentJob.jobId, { action: 'fail', error: 'The processing server restarted. Retrying.', retryable: true }).catch(() => {});
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// --- Transcription ----------------------------------------------------------
+
+async function transcribe(job, setProgress) {
+  if (!WHISPER_MODEL) throw new Error('WHISPER_MODEL is not set on the worker.');
+  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-whisper-'));
+  const outBase = path.join(workDir, 'transcript');
+  const wavPath = path.join(workDir, 'audio.wav');
+  try {
+    let audioInput = job.source.mediaUrl;
+    if (job.source.youtubeUrl) {
+      setProgress('Downloading audio');
+      await runYtDlpWithRetry(
+        ['--no-playlist', '-f', 'bestaudio/best', '-o', path.join(workDir, 'audio.%(ext)s'), job.source.youtubeUrl],
+        `transcript ${job.jobId}`
+      );
+      const audioFile = (await readdir(workDir)).find((f) => f.startsWith('audio.'));
+      if (!audioFile) throw new Error('yt-dlp did not produce an audio file.');
+      audioInput = path.join(workDir, audioFile);
+    }
+
+    setProgress('Preparing audio');
+    await execFileAsync('ffmpeg', ['-y', '-i', audioInput, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath], {
+      timeout: 20 * 60 * 1000,
+    });
+    const durationSeconds = await probeDuration(wavPath);
+
+    setProgress('Transcribing');
+    const lang = /^[a-z]{2}$/.test(job.language || '') ? job.language : 'auto';
+    // -ml 1 -sow: one segment per word, split on word boundaries -> per-word timing.
+    await execFileAsync(
+      WHISPER_BIN,
+      ['-m', WHISPER_MODEL, '-f', wavPath, '-l', lang, '-t', WHISPER_THREADS, '-ml', '1', '-sow', '-oj', '-of', outBase],
+      { timeout: 3 * 60 * 60 * 1000, maxBuffer: 1024 * 1024 * 64 }
+    );
+
+    const json = JSON.parse(await readFile(`${outBase}.json`, 'utf8'));
+    const words = (json.transcription || [])
+      .map((t) => ({ w: String(t.text || '').trim(), s: (t.offsets?.from ?? 0) / 1000, e: (t.offsets?.to ?? 0) / 1000 }))
+      .filter((w) => w.w && !/^\[.*\]$/.test(w.w)); // drop [BLANK_AUDIO], [Music] markers
+    const segments = groupWords(words);
+    if (!segments.length) {
+      const err = new Error('No speech was detected in this recording.');
+      err.permanent = true;
+      throw err;
+    }
+    return { segments, durationSeconds: Math.ceil(durationSeconds || words[words.length - 1].e), language: json.result?.language || lang };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function probeDuration(file) {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+    return Number(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// --- Rendering --------------------------------------------------------------
+
+const FRAME = { '9:16': [1080, 1920], '1:1': [1080, 1080], '16:9': [1920, 1080] };
+
+async function renderClip(job, setProgress) {
+  if (!BLOB_TOKEN) throw new Error('BLOB_READ_WRITE_TOKEN is not set on the worker.');
+  const { startTime, endTime, aspectRatio, captionStyle, captionPosition, layout, cropX, cues, clipId, outputPrefix } = job;
+  const duration = Math.min(180, endTime - startTime);
+  const [W, H] = FRAME[aspectRatio] || FRAME['9:16'];
+  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-render-'));
   const rawPath = path.join(workDir, 'raw.mp4');
   const assPath = path.join(workDir, 'subs.ass');
   const outPath = path.join(workDir, 'out.mp4');
-  const tag = `[render ${clipId || '?'}]`;
 
   try {
     let inputArgs;
-    if (mediaUrl) {
-      // ffmpeg seeks inside the remote file with HTTP range requests, so
-      // only the needed part is actually read.
-      console.log(`${tag} cutting ${startTime}-${endTime}s from uploaded file`);
-      inputArgs = ['-ss', String(startTime), '-i', mediaUrl];
+    if (job.source.mediaUrl) {
+      // ffmpeg seeks with HTTP range requests, so only the needed part is read.
+      inputArgs = ['-ss', String(startTime), '-i', job.source.mediaUrl];
     } else {
-      console.log(`${tag} downloading ${startTime}-${endTime}s of ${youtubeUrl}`);
-      // Pad the section slightly so ffmpeg has keyframes to cut cleanly on.
+      setProgress('Downloading the section');
       const padStart = Math.max(0, Math.floor(startTime) - 2);
       const padEnd = Math.ceil(endTime) + 2;
       await runYtDlpWithRetry(
@@ -159,208 +280,57 @@ async function renderClip({ youtubeUrl, mediaUrl, startTime, endTime, aspectRati
           '-f', 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b',
           '--merge-output-format', 'mp4',
           '-o', rawPath,
-          youtubeUrl,
+          job.source.youtubeUrl,
         ],
-        `render clip ${clipId || '?'}`
+        `render ${clipId}`
       );
       inputArgs = ['-ss', String(Math.max(0, startTime - padStart)), '-i', rawPath];
     }
 
-    await writeFile(assPath, buildAss(captionText, duration, aspectRatio, captionStyle), 'utf8');
-    const scaleCrop = SCALE_CROP[aspectRatio] || SCALE_CROP['9:16'];
-    const assFilterPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+    await writeFile(assPath, buildAss(cues || [], W, H, captionStyle, captionPosition), 'utf8');
+    const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:')}`;
+    const x = Math.min(1, Math.max(0, Number(cropX ?? 0.5)));
+    const filter =
+      layout === 'fit'
+        ? // Whole frame visible (slides, wide shots) over a blurred fill.
+          `[0:v]split[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=20:4[bg];` +
+          `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,${assFilter}[v]`
+        : // Crop to frame, with the horizontal focus the customer chose.
+          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}:(iw-${W})*${x.toFixed(3)}:(ih-${H})/2,${assFilter}[v]`;
 
-    console.log(`${tag} encoding + burning captions`);
+    setProgress('Encoding');
     await execFileAsync(
       'ffmpeg',
       [
-        '-y',
-        ...inputArgs,
-        '-t', String(duration),
-        '-vf', `${scaleCrop},ass=${assFilterPath}`,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-movflags', '+faststart',
+        '-y', ...inputArgs, '-t', String(duration),
+        '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
         outPath,
       ],
-      { timeout: 15 * 60 * 1000 }
+      { timeout: 30 * 60 * 1000, maxBuffer: 1024 * 1024 * 20 }
     );
 
-    const fileBuffer = await readFile(outPath);
-    const filename = `clips/${clipId || Date.now()}_${aspectRatio.replace(':', 'x')}.mp4`;
-    console.log(`${tag} uploading (${(fileBuffer.length / 1e6).toFixed(1)}MB)`);
-    const blob = await put(filename, fileBuffer, {
-      access: 'public',
+    setProgress('Uploading');
+    const size = (await stat(outPath)).size;
+    const blob = await put(`${outputPrefix}${clipId}_${aspectRatio.replace(':', 'x')}.mp4`, createReadStream(outPath), {
+      access: BLOB_ACCESS,
       contentType: 'video/mp4',
       token: BLOB_TOKEN,
       addRandomSuffix: true,
+      multipart: size > 50 * 1024 * 1024,
     });
-    return blob.url;
+    return { pathname: blob.pathname, bytes: size };
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-app.post('/render/start', (req, res) => {
-  if (!checkAuth(req, res)) return;
-  if (!BLOB_TOKEN) {
-    return res.status(500).json({ success: false, error: 'BLOB_READ_WRITE_TOKEN is not set on the worker.' });
-  }
-  const source = sourceFromBody(req.body);
-  if (source.error) return res.status(400).json({ success: false, error: source.error });
+// --- yt-dlp -----------------------------------------------------------------
 
-  const { startTime, endTime, aspectRatio = '9:16', captionText = '', captionStyle = 'Dynamic Pop', clipId } = req.body;
-  if (typeof startTime !== 'number' || typeof endTime !== 'number' || endTime <= startTime) {
-    return res.status(400).json({ success: false, error: 'startTime and endTime are required.' });
-  }
-
-  const jobId = renderJobs.create();
-  runExclusive(() =>
-    renderClip({ ...source, startTime, endTime, aspectRatio, captionText, captionStyle, clipId })
-  )
-    .then((videoUrl) => renderJobs.set(jobId, { status: 'done', videoUrl }))
-    .catch((err) => {
-      console.error(`[render ${clipId || '?'}] failed:`, err?.stderr?.toString?.() || err?.message || err);
-      renderJobs.set(jobId, {
-        status: 'error',
-        error: describeWorkerError(err, 'Rendering this clip failed. Try again, or a different clip.'),
-      });
-    });
-  res.json({ success: true, jobId });
-});
-
-app.get('/render/status/:jobId', (req, res) => {
-  if (!checkAuth(req, res)) return;
-  const job = renderJobs.get(req.params.jobId);
-  if (!job) return res.status(404).json({ success: false, error: 'Unknown or expired job id.' });
-  if (job.status === 'processing') return res.json({ success: true, status: 'processing' });
-  if (job.status === 'error') return res.json({ success: true, status: 'error', error: job.error });
-  res.json({ success: true, status: 'done', videoUrl: job.videoUrl });
-});
-
-// --- Transcription (background job) ----------------------------------------
-
-const transcriptJobs = createJobStore();
-const JOB_TIMEOUT_MS = 20 * 60 * 1000; // hard ceiling per transcription
-
-app.post('/transcript/start', (req, res) => {
-  if (!checkAuth(req, res)) return;
-  if (!WHISPER_MODEL) {
-    return res.status(500).json({ success: false, error: 'WHISPER_MODEL is not set on the worker.' });
-  }
-  const source = sourceFromBody(req.body);
-  if (source.error) return res.status(400).json({ success: false, error: source.error });
-
-  const jobId = transcriptJobs.create();
-  runExclusive(() => runTranscriptionJob(jobId, source));
-  res.json({ success: true, jobId });
-});
-
-app.get('/transcript/status/:jobId', (req, res) => {
-  if (!checkAuth(req, res)) return;
-  const job = transcriptJobs.get(req.params.jobId);
-  if (!job) {
-    return res.status(404).json({ success: false, error: 'Unknown or expired job id.' });
-  }
-  if (job.status === 'processing') return res.json({ success: true, status: 'processing' });
-  if (job.status === 'error') return res.json({ success: true, status: 'error', error: job.error });
-  res.json({ success: true, status: 'done', transcript: job.transcript });
-});
-
-async function runTranscriptionJob(jobId, { youtubeUrl, mediaUrl }) {
-  const workDir = await mkdtemp(path.join(tmpdir(), 'viralis-whisper-'));
-  const outBase = path.join(workDir, 'transcript');
-  const wavPath = path.join(workDir, 'audio.wav');
-  try {
-    let audioInput = mediaUrl;
-    if (!mediaUrl) {
-      console.log(`[transcript ${jobId}]: downloading audio for ${youtubeUrl}`);
-      await runYtDlpWithRetry(
-        ['--no-playlist', '-f', 'bestaudio/best', '-o', path.join(workDir, 'audio.%(ext)s'), youtubeUrl],
-        `transcript-audio ${jobId}`
-      );
-      const files = await readdir(workDir);
-      const audioFile = files.find((f) => f.startsWith('audio.'));
-      if (!audioFile) throw new Error('yt-dlp did not produce an audio file.');
-      audioInput = path.join(workDir, audioFile);
-    }
-
-    console.log(`[transcript ${jobId}]: converting to 16kHz mono wav`);
-    await execFileAsync(
-      'ffmpeg',
-      ['-y', '-i', audioInput, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
-      { timeout: 15 * 60 * 1000 }
-    );
-
-    console.log(`[transcript ${jobId}]: transcribing with whisper.cpp (this can take a while)`);
-    await execFileAsync(
-      WHISPER_BIN,
-      ['-m', WHISPER_MODEL, '-f', wavPath, '-l', 'en', '-t', '1', '-ovtt', '-of', outBase],
-      { timeout: JOB_TIMEOUT_MS, maxBuffer: 1024 * 1024 * 20 }
-    );
-
-    const vtt = await readFile(`${outBase}.vtt`, 'utf8');
-    const transcript = parseVtt(vtt);
-    transcriptJobs.set(jobId, {
-      status: transcript.length ? 'done' : 'error',
-      transcript,
-      error: transcript.length ? undefined : 'No speech detected in this video.',
-    });
-  } catch (err) {
-    console.error(`[transcript ${jobId}] failed:`, err?.stderr?.toString?.() || err?.message || err);
-    transcriptJobs.set(jobId, {
-      status: 'error',
-      error: describeWorkerError(err, 'Transcribing this video failed. Try a different video.'),
-    });
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-/**
- * Turns a raw yt-dlp/ffmpeg/whisper failure (command line + stderr dump,
- * meaningless to an end user and potentially leaking internal paths) into a
- * short, human-readable message. Full details still go to console.error for
- * debugging — this is only what gets stored on the Project/Clip and shown
- * in the UI.
- */
-function describeWorkerError(err, fallback) {
-  const raw = String(err?.stderr?.toString?.() || err?.message || err || '');
-  if (/cookies are no longer valid|cookies.*rotated|Sign in to confirm/i.test(raw)) {
-    return 'YouTube is requiring a signed-in session for this video, and the connected account session has expired. An administrator needs to refresh it.';
-  }
-  if (/Video unavailable/i.test(raw)) {
-    return 'This video is unavailable or has been removed.';
-  }
-  if (/Private video/i.test(raw)) {
-    return "This video is private and can't be accessed.";
-  }
-  if (/429|Too Many Requests/i.test(raw)) {
-    return 'YouTube is rate-limiting requests right now. Try again in a few minutes.';
-  }
-  if (/Invalid data found|moov atom not found|does not contain any stream|Server returned 4\d\d/i.test(raw)) {
-    return "Couldn't read that video file. Try re-exporting it as MP4 and uploading again.";
-  }
-  if (/SIGKILL|killed/i.test(raw)) {
-    return 'The worker ran out of memory on this job. Try a shorter video or clip.';
-  }
-  if (/ETIMEDOUT|ENOTFOUND|ECONNRESET|network/i.test(raw)) {
-    return 'A network error interrupted processing. Try again.';
-  }
-  return fallback;
-}
-
-// YouTube blocks anonymous requests from cloud IPs outright (429/403) and,
-// separately, the default web client needs a JS runtime to solve signature
-// challenges this image doesn't have. With cookies attached, only client
-// types that support authenticated sessions are usable (yt-dlp silently
-// skips android/ios otherwise), so we only try "web" in that case; without
-// cookies (local/dev), try android/ios first since they skip the JS-runtime
-// step and are trusted longer. Either way, retry with backoff since 429s can
-// be transient.
+// YouTube blocks anonymous requests from cloud IPs (429/403). With cookies,
+// only the "web" client supports authenticated sessions; without cookies
+// (local/dev), android/ios skip the JS-runtime step.
 function ytDlpClientsFor(hasCookies) {
   return hasCookies ? ['web'] : ['android', 'ios', 'web'];
 }
@@ -372,116 +342,18 @@ async function runYtDlpWithRetry(args, label) {
   for (const client of ytDlpClientsFor(hasCookies)) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return await execFileAsync(
-          'yt-dlp',
-          [...cookieArgs, '--extractor-args', `youtube:player_client=${client}`, ...args],
-          { timeout: 8 * 60 * 1000, maxBuffer: 1024 * 1024 * 20 }
-        );
+        return await execFileAsync('yt-dlp', [...cookieArgs, '--extractor-args', `youtube:player_client=${client}`, ...args], {
+          timeout: 15 * 60 * 1000,
+          maxBuffer: 1024 * 1024 * 20,
+        });
       } catch (err) {
         lastErr = err;
         const msg = err?.stderr?.toString?.() || err?.message || '';
         console.warn(`[yt-dlp] ${label} (${client}, attempt ${attempt + 1}) failed: ${msg.slice(0, 300)}`);
-        const transient = /429|Too Many Requests|403|Forbidden/.test(msg);
-        if (!transient) break; // no point retrying a hard failure (e.g. private video) with the same client
+        if (!/429|Too Many Requests|403|Forbidden/.test(msg)) break;
         await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
       }
     }
   }
   throw lastErr;
 }
-
-const SCALE_CROP = {
-  '9:16': 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
-  '1:1': 'scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080',
-  '16:9': 'scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080',
-};
-
-function assTime(seconds) {
-  const s = Math.max(0, seconds);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  const cs = Math.floor((s % 1) * 100);
-  return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
-}
-
-function buildAss(text, durationSeconds, aspectRatio, style) {
-  const vertical = aspectRatio === '9:16';
-  const resX = vertical ? 1080 : aspectRatio === '1:1' ? 1080 : 1920;
-  const resY = vertical ? 1920 : aspectRatio === '1:1' ? 1080 : 1080;
-  const marginV = vertical ? 960 : Math.round(resY / 2);
-
-  let header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${resX}\nPlayResY: ${resY}\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n`;
-
-  if (style === 'Minimalist') {
-    header += `Style: Default,Helvetica,${Math.round(resX * 0.045)},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,4,0,2,10,10,${Math.round(resY * 0.08)},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-  } else {
-    header += `Style: Default,Arial,${Math.round(resX * 0.065)},&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,10,0,5,10,10,${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-  }
-
-  const words = String(text || '').replace(/[^\w\s'.,!?-]/g, '').split(/\s+/).filter(Boolean);
-  if (words.length === 0) return header;
-
-  const chunkDuration = Math.max(1.6, durationSeconds / Math.max(1, Math.ceil(words.length / 3)));
-  let t = 0;
-  let lines = '';
-  for (let i = 0; i < words.length; i += 3) {
-    const phrase = words.slice(i, i + 3).join(' ').toUpperCase();
-    const start = assTime(t);
-    const end = assTime(Math.min(durationSeconds, t + chunkDuration));
-    lines +=
-      style === 'Minimalist'
-        ? `Dialogue: 0,${start},${end},Default,,0,0,0,,${phrase}\n`
-        : `Dialogue: 0,${start},${end},Default,,0,0,0,,{\\an5\\fscx115\\fscy115}${phrase}\n`;
-    t += chunkDuration;
-    if (t >= durationSeconds) break;
-  }
-  return header + lines;
-}
-
-function vttTimeToSeconds(t) {
-  const [h, m, s] = t.split(':');
-  return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseFloat(s);
-}
-
-/** Parses a WebVTT file (whisper.cpp's -ovtt output) into plain timestamped
- * segments. */
-function parseVtt(vtt) {
-  const lines = vtt.replace(/\r/g, '').split('\n');
-  const timeRe = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/;
-  const segments = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(timeRe);
-    if (!m) continue;
-    const start = vttTimeToSeconds(m[1]);
-    const end = vttTimeToSeconds(m[2]);
-    const textLines = [];
-    i++;
-    while (i < lines.length && lines[i].trim() !== '') {
-      textLines.push(lines[i]);
-      i++;
-    }
-    const text = textLines
-      .join(' ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (text) segments.push({ text, start, end: end || start + 3 });
-  }
-
-  const deduped = [];
-  for (const seg of segments) {
-    const prev = deduped[deduped.length - 1];
-    if (prev && prev.text === seg.text) {
-      prev.end = seg.end;
-      continue;
-    }
-    deduped.push(seg);
-  }
-  return deduped;
-}
-
-app.listen(PORT, () => {
-  console.log(`Viralis render worker listening on :${PORT}`);
-});

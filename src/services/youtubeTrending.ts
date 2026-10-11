@@ -1,5 +1,3 @@
-import { prisma } from '../lib/prisma';
-
 export type VideoVibe = 'hook' | 'calm' | 'trendy' | 'story';
 
 export const VIBE_LABEL: Record<VideoVibe, string> = {
@@ -25,9 +23,8 @@ export interface TrendingVideo {
 
 export class MissingYouTubeKeyError extends Error {
   constructor() {
-    super(
-      'No YouTube Data API key configured. Add one in Settings (free — console.cloud.google.com/apis/credentials, enable "YouTube Data API v3").'
-    );
+    super('Trending videos aren’t available right now. Please try again later.');
+    console.error('[trending] YOUTUBE_API_KEY is not set.');
     this.name = 'MissingYouTubeKeyError';
   }
 }
@@ -55,15 +52,18 @@ function parseIsoDuration(iso: string): number {
 }
 
 /**
- * The Data API key is platform configuration, not something each customer
- * should have to create. The env key wins; a key saved in Settings is only a
- * fallback for self-hosted installs without one (a stale saved key used to
- * override a working env key and break trending for everyone).
+ * The Data API key is platform configuration (YOUTUBE_API_KEY), not
+ * something each customer should have to create.
  */
 async function getApiKey(): Promise<string | null> {
-  if (process.env.YOUTUBE_API_KEY) return process.env.YOUTUBE_API_KEY;
-  const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-  return settings?.youtubeDataApiKey || null;
+  return process.env.YOUTUBE_API_KEY || null;
+}
+
+interface ApiVideo {
+  id: string;
+  snippet?: { title?: string; categoryId?: string; channelTitle?: string; publishedAt?: string; thumbnails?: { medium?: { url?: string }; default?: { url?: string } } };
+  contentDetails?: { duration?: string };
+  statistics?: { viewCount?: string; likeCount?: string };
 }
 
 export interface TrendingPage {
@@ -122,7 +122,7 @@ export async function fetchTrendingVideos(opts: {
   let notice: string | undefined;
 
   let res = await requestChart(apiKey, regionCode, categoryId, maxResults, opts.pageToken);
-  let items: any[] = [];
+  let items: ApiVideo[] = [];
   let nextPageToken: string | null = null;
 
   if (res.status === 404 && categoryId) {
@@ -130,7 +130,7 @@ export async function fetchTrendingVideos(opts: {
     const label = TRENDING_CATEGORIES[categoryId] || 'this category';
     res = await requestChart(apiKey, regionCode, undefined, 50);
     if (!res.ok) throw await describeApiFailure(res);
-    const all: any[] = (await res.json()).items || [];
+    const all: ApiVideo[] = (await res.json()).items || [];
     const matching = all.filter((v) => v.snippet?.categoryId === categoryId);
     if (matching.length) {
       items = matching.slice(0, maxResults);

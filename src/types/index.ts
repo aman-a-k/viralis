@@ -22,49 +22,6 @@ export interface GeneratedContent {
   tags?: string[];
 }
 
-// Secrets are never sent to the client — only whether one is saved.
-export interface SettingsData {
-  youtubeId: string;
-  instagramId: string;
-  hasOpenAi: boolean;
-  youtubeClientId: string;
-  hasYoutubeClientSecret: boolean;
-  hasYoutubeAuth: boolean;
-  hasInstagramToken: boolean;
-  hasDiscordWebhook: boolean;
-  hasPexelsKey: boolean;
-  hasElevenLabsKey: boolean;
-}
-
-export interface VideoData {
-  id: string;
-  topic: string;
-  status: string;
-  createdAt: string;
-  views: number;
-  likes: number;
-}
-
-export interface DashboardStats {
-  totalGenerated: number;
-  successCount: number;
-  views: number;
-  engagement: number;
-  subs: number;
-  revenue: number;
-  /** null until at least one clip has real performance metrics. */
-  avgWatchThrough?: number | null;
-}
-
-export interface AgentStatus {
-  id: string;
-  name: string;
-  role: string;
-  status: 'idle' | 'working' | 'error';
-  lastAction: string;
-  capabilities: string[];
-}
-
 export interface PlatformCaptions {
   instagram: string;
   youtube: string;
@@ -73,6 +30,10 @@ export interface PlatformCaptions {
   tiktok: string;
 }
 
+export type ClipStatus = 'candidate' | 'in_review' | 'approved' | 'published' | 'rejected';
+export type RenderStatus = 'queued' | 'rendering' | 'rendered' | 'failed' | 'stale' | 'expired' | null;
+
+/** A clip as the API sends it to the browser (see serializeClip in pipeline.ts). */
 export interface ClipData {
   id: string;
   projectId: string;
@@ -83,60 +44,106 @@ export interface ClipData {
   viralityScore: number;
   reasoning: string;
   hookType?: string | null;
-  aspectRatios: string[] | string;
   transcriptSegment: string;
-  captionVersions: PlatformCaptions | string;
-  videoUrl?: string | null;
-  renderStatus?: 'rendering' | 'rendered' | 'failed' | null;
+  captionVersions: Partial<PlatformCaptions>;
+  status: ClipStatus;
+  renderStatus: RenderStatus;
   renderError?: string | null;
-  status: 'candidate' | 'approved' | 'scheduled' | 'published' | 'rejected';
-  createdAt: string;
-  metrics?: MetricData[];
-  /** Latest YouTube publish attempt, if any. */
-  schedules?: { status: string; postUrl?: string | null; error?: string | null }[];
+  renderedAspect?: string | null;
+  hasRender: boolean;
+  edited: boolean;
+  cropX: number;
+  layout: 'fill' | 'fit';
+  captionPosition: 'top' | 'middle' | 'bottom';
+  captionStyle: 'Dynamic Pop' | 'Minimalist';
+  publishTitle: string;
+  publishDescription: string;
+  publishTags: string[];
+  madeForKids: boolean;
+  containsSyntheticMedia: boolean;
+  publish: { status: string; postUrl: string | null; error: string | null } | null;
+  updatedAt: string;
 }
+
+export type ProjectStatus = 'queued' | 'transcribing' | 'analyzing' | 'ready' | 'failed' | 'processing';
 
 export interface ProjectData {
   id: string;
   title: string;
-  sourceVideoUrl?: string | null;
+  sourceType: 'upload' | 'youtube' | 'transcript' | string;
   sourceVideoId?: string | null;
-  sourceType: 'upload' | 'youtube' | 'drive' | 'zoom';
+  sourceVideoUrl?: string | null;
+  hasSourceMedia: boolean;
   channel?: string | null;
   thumbnail?: string | null;
-  transcript?: string | null;
   duration?: number | null;
-  status: 'processing' | 'transcribing' | 'ready' | 'failed';
+  language?: string | null;
+  status: ProjectStatus;
+  stage?: string | null;
   errorMessage?: string | null;
-  metadata?: string | null;
   createdAt: string;
   updatedAt: string;
-  clips?: ClipData[];
+  clips: ClipData[];
 }
 
-export interface ScheduleData {
+export interface PlanSummary {
   id: string;
-  clipId?: string | null;
-  clip?: ClipData | null;
-  platform: string;
-  scheduledTime: string;
-  publishedTime?: string | null;
-  status: 'pending' | 'published' | 'failed';
-  postId?: string | null;
+  name: string;
+  source: 'subscription' | 'trial' | 'none' | 'unlimited';
+  periodEnd: string | null;
+  status: string | null;
+  cancelAtPeriodEnd: boolean;
+  maxSourceMinutes: number;
+  maxUploadMb: number;
+  limits: { sourceMinutes: number; exports: number };
+  used: { sourceMinutes: number; exports: number };
 }
 
-export interface MetricData {
+export interface WorkspaceSettings {
+  brandName: string;
+  brandNiche: string;
+  brandTone: string;
+  targetAudience: string;
+  captionStyle: string;
+  defaultLanguage: string;
+  defaultPlatforms: string[];
+  defaultOrientations: string[];
+}
+
+export interface ApprovalItem {
   id: string;
+  topic: string;
+  script: string;
+  visualPrompts: string;
+  captions: string;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  seoTags?: string | null;
   clipId?: string | null;
-  platform: string;
-  views: number;
-  likes: number;
-  shares: number;
-  comments: number;
-  saves: number;
-  watchThroughPct: number;
-  rootCauseTag?: string | null;
-  fetchedAt: string;
+  createdAt: string;
+}
+
+export interface TrendRecord {
+  id: string;
+  topic: string;
+  score: number;
+  keywords: string;
+  isViable: boolean;
+  analysis: string | null;
+  createdAt: string;
+}
+
+export interface DashboardData {
+  user: { email: string | null; emailVerified: boolean; role: 'owner' | 'admin' | 'member'; isPlatformAdmin: boolean };
+  workspace: { id: string; name: string; retentionDays: number };
+  projects: ProjectData[];
+  stats: { projects: number; clipsFound: number; clipsExported: number; clipsPublished: number; avgWatchThrough: number | null };
+  plan: PlanSummary;
+  channel: { connected: boolean; title?: string | null; status?: string; lastError?: string | null; legacy?: boolean };
+  capabilities: { youtubeConnect: boolean; billing: boolean; email: boolean };
+  settings: WorkspaceSettings;
+  trends: TrendRecord[];
+  approvalQueue: ApprovalItem[];
 }
 
 export interface TrendSignalData {

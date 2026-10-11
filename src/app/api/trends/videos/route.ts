@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse, HttpError } from '@/lib/http';
 import { fetchTrendingVideos, MissingYouTubeKeyError } from '@/services/youtubeTrending';
 
 export async function GET(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
+    await requireWorkspace();
     const { searchParams } = new URL(req.url);
     const page = await fetchTrendingVideos({
       regionCode: searchParams.get('region') || undefined,
@@ -15,11 +14,9 @@ export async function GET(req: Request) {
       pageToken: searchParams.get('pageToken') || undefined,
     });
     return NextResponse.json({ success: true, ...page });
-  } catch (error: unknown) {
-    const status = error instanceof MissingYouTubeKeyError ? 424 : 500;
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
-      { status }
-    );
+  } catch (error) {
+    if (error instanceof MissingYouTubeKeyError) return errorResponse(new HttpError(503, error.message));
+    if (error instanceof Error && /YouTube API/.test(error.message)) return errorResponse(new HttpError(502, error.message));
+    return errorResponse(error, 'Could not load trending videos.', 'api/trends/videos');
   }
 }

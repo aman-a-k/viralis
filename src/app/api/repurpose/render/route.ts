@@ -1,56 +1,32 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/apiAuth';
-import { RepurposingService } from '@/services/repurposingService';
-import { RenderWorkerNotConfiguredError } from '@/lib/renderWorker';
+import { prisma } from '@/lib/prisma';
+import { requireWorkspace, getOwnedClip } from '@/lib/workspace';
+import { errorResponse, badRequest } from '@/lib/http';
+import { requestRender, isAspect, serializeClip } from '@/services/pipeline';
 
-// Starting a job can wait out a cold worker (~30-60s on Render's free tier).
-export const maxDuration = 60;
-
-const ASPECT_RATIOS = ['9:16', '1:1', '16:9'] as const;
-const CAPTION_STYLES = ['Dynamic Pop', 'Minimalist'];
-
-function clipState(clip: { id: string; renderStatus: string | null; renderError: string | null; videoUrl: string | null }) {
-  return { clipId: clip.id, renderStatus: clip.renderStatus, renderError: clip.renderError, videoUrl: clip.videoUrl };
-}
-
+/** Queues an export (render) of a clip. Counts toward the plan's exports. */
 export async function POST(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
-    const { clipId, aspectRatio = '9:16', captionStyle = 'Dynamic Pop' } = await req.json();
-    if (typeof clipId !== 'string' || !clipId) {
-      return NextResponse.json({ success: false, error: 'clipId is required' }, { status: 400 });
-    }
-    if (!ASPECT_RATIOS.includes(aspectRatio) || !CAPTION_STYLES.includes(captionStyle)) {
-      return NextResponse.json({ success: false, error: 'Unsupported aspect ratio or caption style.' }, { status: 400 });
-    }
-
-    const clip = await RepurposingService.startRender(clipId, aspectRatio, captionStyle);
-    return NextResponse.json({ success: true, ...clipState(clip) });
-  } catch (error: unknown) {
-    const status = error instanceof RenderWorkerNotConfiguredError ? 424 : 500;
-    console.error('[API /api/repurpose/render POST]', error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Could not start rendering.' },
-      { status }
-    );
+    const ctx = await requireWorkspace({ verified: true });
+    const { clipId, aspectRatio = '9:16' } = await req.json().catch(() => ({}));
+    if (!isAspect(aspectRatio)) throw badRequest('Unsupported aspect ratio.');
+    const clip = await requestRender({ workspaceId: ctx.workspaceId, userId: ctx.userId, unlimited: ctx.isPlatformAdmin }, String(clipId || ''), aspectRatio);
+    const full = await prisma.clip.findUnique({ where: { id: clip.id }, include: { schedules: { where: { platform: 'youtube' }, orderBy: { createdAt: 'desc' }, take: 1 } } });
+    return NextResponse.json({ success: true, clip: serializeClip(full!) });
+  } catch (error) {
+    return errorResponse(error, 'Could not start the export.', 'api/repurpose/render');
   }
 }
 
+/** Export status for one clip. */
 export async function GET(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
-  const clipId = new URL(req.url).searchParams.get('clipId');
-  if (!clipId) {
-    return NextResponse.json({ success: false, error: 'clipId is required' }, { status: 400 });
-  }
   try {
-    const clip = await RepurposingService.pollRender(clipId);
-    return NextResponse.json({ success: true, ...clipState(clip) });
-  } catch (error: unknown) {
-    console.error('[API /api/repurpose/render GET]', error);
-    return NextResponse.json({ success: false, error: 'Could not check render status.' }, { status: 500 });
+    const ctx = await requireWorkspace();
+    const clip = await getOwnedClip(ctx.workspaceId, new URL(req.url).searchParams.get('clipId'));
+    const job = clip.renderJobId ? await prisma.job.findUnique({ where: { id: clip.renderJobId }, select: { status: true, progress: true } }) : null;
+    const full = await prisma.clip.findUnique({ where: { id: clip.id }, include: { schedules: { where: { platform: 'youtube' }, orderBy: { createdAt: 'desc' }, take: 1 } } });
+    return NextResponse.json({ success: true, clip: serializeClip(full!), progress: job?.progress || null });
+  } catch (error) {
+    return errorResponse(error, 'Could not check the export.', 'api/repurpose/render GET');
   }
 }

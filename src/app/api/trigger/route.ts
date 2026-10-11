@@ -1,25 +1,17 @@
 import { NextResponse } from 'next/server';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse } from '@/lib/http';
 import { WorkflowScheduler } from '@/services/scheduler';
-import { requireSession } from '@/lib/apiAuth';
 
-// The autopilot workflow chains several sequential LLM calls; allow up to
-// the Hobby-plan max.
+// Writes a script idea from today's trends (several sequential AI calls).
 export const maxDuration = 60;
 
 export async function POST() {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
-    const result = await WorkflowScheduler.runDailyJob();
-    return NextResponse.json({
-      success: result.success,
-      message: result.message,
-    }, { status: result.success ? 200 : 502 });
+    const ctx = await requireWorkspace({ verified: true });
+    const result = await WorkflowScheduler.runDailyJob(ctx.workspaceId);
+    return NextResponse.json({ success: result.success, message: result.message }, { status: result.success ? 200 : 502 });
   } catch (error) {
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to trigger workflow' },
-      { status: 500 }
-    );
+    return errorResponse(error, 'Could not write a script idea.', 'api/trigger');
   }
 }

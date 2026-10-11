@@ -3,10 +3,10 @@
 // Replaces the root layout when it fails, so it can't rely on globals.css.
 export default function GlobalError({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string };
-  unstable_retry: () => void;
+  retry: () => void;
 }) {
   return (
     <html lang="en">
@@ -19,7 +19,7 @@ export default function GlobalError({
           </p>
           <button
             type="button"
-            onClick={() => unstable_retry()}
+            onClick={() => retry()}
             style={{ padding: "0.6rem 1.25rem", borderRadius: 8, border: "none", background: "#ededed", color: "#0a0a0a", fontWeight: 600, cursor: "pointer" }}
           >
             Try again

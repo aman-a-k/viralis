@@ -1,79 +1,31 @@
 import { NextResponse } from 'next/server';
-import { describeLlmError } from '@/lib/llm';
-import { RepurposingService } from '@/services/repurposingService';
-import { prisma } from '@/lib/prisma';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse, badRequest } from '@/lib/http';
+import { ingestYouTube, ingestTranscript, normalizeConfig, clampClipCount, projectView } from '@/services/pipeline';
 
-// Analysis chains multiple LLM calls; allow up to the Hobby-plan max.
+// Starting work can include a direct caption fetch; analysis itself runs in
+// the background and is followed via GET /api/projects/<id>.
 export const maxDuration = 60;
 
-export async function GET() {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
-  try {
-    const projects = await prisma.project.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        clips: {
-          orderBy: { viralityScore: 'desc' },
-          include: { metrics: true },
-        },
-      },
-    });
-
-    return NextResponse.json({ success: true, projects });
-  } catch (error: any) {
-    console.error('[API /api/repurpose GET] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
-
+/** Starts a project from a YouTube link or a pasted transcript. */
 export async function POST(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
-    const body = await req.json();
-    const { title, sourceVideoUrl, transcriptText, clipCount, platforms, orientations, captionStyle } = body;
+    const ctx = await requireWorkspace({ verified: true });
+    const body = await req.json().catch(() => ({}));
+    const actor = { workspaceId: ctx.workspaceId, userId: ctx.userId, unlimited: ctx.isPlatformAdmin };
+    const config = normalizeConfig(body);
+    const clipCount = clampClipCount(body.clipCount);
 
-    if (!sourceVideoUrl && !transcriptText) {
-      return NextResponse.json(
-        { success: false, error: 'Paste a YouTube link or a full transcript.' },
-        { status: 400 }
-      );
+    let project;
+    if (typeof body.sourceVideoUrl === 'string' && body.sourceVideoUrl.trim()) {
+      project = await ingestYouTube(actor, { url: body.sourceVideoUrl.trim(), clipCount, config, rightsConfirmed: body.rightsConfirmed === true });
+    } else if (typeof body.transcriptText === 'string') {
+      project = await ingestTranscript(actor, { title: String(body.title || ''), text: body.transcriptText, clipCount, config });
+    } else {
+      throw badRequest('Paste a YouTube link or a transcript.');
     }
-
-    const result = await RepurposingService.ingestVideo({
-      title,
-      sourceVideoUrl,
-      transcriptText,
-      desiredClipCount: Math.min(10, Math.max(3, Number(clipCount) || 5)),
-      platforms: Array.isArray(platforms) && platforms.length ? platforms : undefined,
-      orientations: Array.isArray(orientations) && orientations.length ? orientations : undefined,
-      captionStyle,
-    });
-
-    if ('transcribing' in result && result.transcribing) {
-      return NextResponse.json({
-        success: true,
-        transcribing: true,
-        project: result.project,
-        message: `Fetched "${result.project.title}" — transcribing the audio now (can take a few minutes for longer videos)…`,
-      });
-    }
-
-    return NextResponse.json({
-      success: true,
-      project: result.project,
-      clips: result.clips,
-      message: `Analyzed "${result.project.title}" — surfaced ${result.clips.length} clips.`,
-    });
-  } catch (error: unknown) {
-    console.error('[API /api/repurpose POST] Error:', error);
-    return NextResponse.json(
-      { success: false, error: describeLlmError(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true, project: await projectView(ctx.workspaceId, project.id) });
+  } catch (error) {
+    return errorResponse(error, 'Could not start this project.', 'api/repurpose');
   }
 }

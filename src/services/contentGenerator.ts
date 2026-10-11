@@ -7,14 +7,14 @@ export class ContentGenerator {
    * Generates a short-form video script, scene list, visual prompts and
    * timed captions for a trending topic.
    */
-  static async generateVideoContent(trend: TrendData): Promise<GeneratedContent> {
-    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+  static async generateVideoContent(trend: TrendData, workspaceId: string): Promise<GeneratedContent> {
+    const settings = await prisma.settings.findUnique({ where: { workspaceId } });
     const { client, model } = await getLlmClient();
 
     const brand = [
-      `Brand: ${settings?.brandName || 'Viralis'}`,
-      `Niche: ${settings?.brandNiche || 'Technology & AI'}`,
-      `Tone: ${settings?.brandTone || 'Punchy & Viral'}`,
+      `Brand: ${settings?.brandName || 'the creator'}`,
+      `Niche: ${settings?.brandNiche || 'general interest'}`,
+      `Tone: ${settings?.brandTone || 'clear and engaging'}`,
       `Audience: ${settings?.targetAudience || 'Social media audience'}`,
     ].join('\n');
 

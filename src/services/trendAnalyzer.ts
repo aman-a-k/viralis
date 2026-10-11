@@ -8,8 +8,8 @@ export class TrendAnalyzer {
    * (best effort — the unofficial API is frequently blocked), then falls back
    * to an LLM pass grounded in the workspace's niche.
    */
-  static async getDailyTrend(): Promise<TrendData> {
-    const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
+  static async getDailyTrend(workspaceId: string): Promise<TrendData> {
+    const settings = await prisma.settings.findUnique({ where: { workspaceId } });
     const niche = settings?.brandNiche || 'technology and internet culture';
     const audience = settings?.targetAudience || 'a general social media audience';
 

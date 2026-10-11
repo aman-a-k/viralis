@@ -1,5 +1,5 @@
 {
-  "name": "ai-social-media-automator",
+  "name": "viralis",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,22 +7,20 @@
     "build": "prisma generate && node scripts/migrate-on-deploy.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.2",
+    "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "^5.22.0",
     "@vercel/blob": "^2.8.0",
-    "axios": "^1.16.0",
     "bcryptjs": "^2.4.3",
-    "dotenv": "^17.4.2",
     "googleapis": "^171.4.0",
     "lucide-react": "^1.14.0",
-    "next": "16.2.6",
-    "next-auth": "^4.24.14",
-    "node-cron": "^4.2.1",
+    "next": "^16.3.8",
+    "next-auth": "^4.24.15",
     "openai": "^6.37.0",
-    "pm2": "^7.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hot-toast": "^2.6.0",
@@ -30,14 +28,23 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^20",
-    "@types/node-cron": "^3.0.11",
+    "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.3.8",
     "prisma": "^5.22.0",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "next-auth": {
+      "@auth/core": "0.41.3"
+    }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

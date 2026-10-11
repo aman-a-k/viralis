@@ -1,6 +1,7 @@
 import { BaseAgent, AgentResponse } from './base';
 import { TrendAnalyzer } from '../services/trendAnalyzer';
 import { prisma } from '../lib/prisma';
+import type { TrendData } from '../types';
 
 interface TrendAnalysis {
   isViable: boolean;
@@ -16,10 +17,10 @@ export class TrendAgent extends BaseAgent {
     );
   }
 
-  async run(): Promise<AgentResponse> {
+  async run(workspaceId: string): Promise<AgentResponse<{ originalTrend: TrendData; aiAnalysis: TrendAnalysis }>> {
     this.log('Scanning for viral opportunities...');
     try {
-      const trend = await TrendAnalyzer.getDailyTrend();
+      const trend = await TrendAnalyzer.getDailyTrend(workspaceId);
 
       const analysis = await this.chatJSON<TrendAnalysis>(
         `Trend: "${trend.topic}" (est. interest ${trend.score}/100, keywords: ${trend.keywords.join(', ')}).
@@ -29,6 +30,7 @@ Evaluate its potential for a viral Short/Reel. Return JSON:
 
       await prisma.trend.create({
         data: {
+          workspaceId,
           topic: trend.topic,
           score: trend.score,
           keywords: JSON.stringify(trend.keywords),
@@ -42,9 +44,10 @@ Evaluate its potential for a viral Short/Reel. Return JSON:
         message: `Trend identified: ${trend.topic}`,
         data: { originalTrend: trend, aiAnalysis: analysis },
       };
-    } catch (error: any) {
-      this.log(`Error: ${error.message}`);
-      return { success: false, message: 'Trend analysis failed.', error: error.message };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`Error: ${message}`);
+      return { success: false, message: 'Trend analysis failed.', error: message };
     }
   }
 }

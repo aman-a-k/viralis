@@ -1,45 +1,65 @@
-# Viralis render worker
+# Viralis media worker
 
-Cuts, reframes, and caption-burns clips with real ffmpeg + yt-dlp. Deployed
-**separately** from the main Next.js app — Vercel's serverless functions
-can't run ffmpeg or hold a job open long enough, so this runs as its own
-always-on service.
+Transcribes recordings (whisper.cpp, any language, word-level timestamps) and
+renders clips (ffmpeg: cut, reframe, burn captions). It runs **separately**
+from the Next.js app because serverless functions can't run ffmpeg/whisper or
+hold a job for minutes.
 
-## Deploy to Render (free tier, no card to start)
+## How it works
 
-1. Push this repo to GitHub (already done if you're reading this from the repo).
-2. [dashboard.render.com](https://dashboard.render.com) → **New +** → **Web Service**.
-3. Connect this GitHub repo.
-4. Settings:
-   - **Root Directory**: `worker`
-   - **Runtime**: `Docker` (it'll pick up `worker/Dockerfile` automatically)
-   - **Instance Type**: Free
-5. **Environment** → add:
-   - `WORKER_SECRET` — any long random string (generate one with `openssl rand -hex 24`). You'll put the same value in the main app's `RENDER_WORKER_SECRET`.
-   - `BLOB_READ_WRITE_TOKEN` — from the Vercel project → Storage → your Blob store → `.env.local` tab.
-6. Deploy. Render gives you a URL like `https://viralis-render-worker.onrender.com`.
+The worker **pulls** work from the app; jobs live in the app's database:
 
-## Wire it into the main app
+1. `POST {APP_URL}/api/worker/claim` — returns the next job (or `null`) with
+   short-lived signed URLs for the media it needs.
+2. While working it heartbeats `POST {APP_URL}/api/worker/jobs/:id` every 30s.
+3. It reports `complete` (with the transcript, or the uploaded render's path)
+   or `fail` (with whether a retry could help).
 
-In the **Next.js app's** Vercel env vars, add:
+Each claim holds a 3-minute lease that heartbeats extend. If the worker crashes
+or is redeployed, the lease lapses and the job is handed out again (up to 3
+attempts) — nothing is lost with the process. On a normal shutdown (SIGTERM)
+the current job is handed back immediately.
 
-```
-RENDER_WORKER_URL=https://<your-render-worker>.onrender.com
-RENDER_WORKER_SECRET=<the same WORKER_SECRET value>
-```
+The worker polls every 60s when idle, and the app calls `POST /wake` whenever
+it queues work so jobs start right away. It never needs database credentials.
 
-Redeploy the main app. "Approve & Render" in the Approval Queue will now
-actually cut a real clip instead of returning the "media worker not
-enabled" message.
+## Deploy on Render
 
-## Notes
+1. [dashboard.render.com](https://dashboard.render.com) → **New → Web Service** → this repo.
+2. **Root Directory**: `worker` · **Runtime**: Docker.
+3. **Instance type**: the free tier (512 MB) works with the default `base` model
+   for recordings up to ~45 minutes, but it sleeps after 15 idle minutes.
+   For paying customers use **Starter or above** (always on); with 2 GB+ you can
+   build with `WHISPER_MODEL_NAME=small-q5_1` for noticeably better accuracy on
+   Indian languages (Docker build argument).
+4. **Environment**:
 
-- **Free-tier cold starts**: Render's free web services spin down after
-  ~15 minutes idle and take ~30-60s to wake up on the next request. The
-  main app's render call has a generous timeout to absorb this, but the
-  first render after a quiet period will feel slow. Upgrading the Render
-  plan removes the spin-down.
-- **yt-dlp** downloads only the clip's time range (`--download-sections`),
-  not the whole source video, to keep jobs fast even for long videos.
-- Rendered clips are uploaded to **Vercel Blob** (public) and the URL is
-  written back to `Clip.videoUrl`.
+| Variable | Value |
+|---|---|
+| `APP_URL` | The app's public URL, e.g. `https://viralis.example` |
+| `WORKER_SECRET` | Long random string (`openssl rand -hex 24`). Same value as the app's `RENDER_WORKER_SECRET`. |
+| `BLOB_READ_WRITE_TOKEN` | The app's Blob store token (renders are uploaded there). |
+| `BLOB_ACCESS` | `private` (default) or `public` — must match the app. |
+| `WHISPER_THREADS` | CPU threads for transcription (default 2). |
+| `IDLE_POLL_MS` | Idle poll interval (default 60000). |
+
+5. Optional **Secret File** `yt-cookies.txt` (Netscape format) — only needed for
+   YouTube-link projects, because YouTube blocks anonymous downloads from cloud
+   servers. Uploaded files never touch YouTube.
+
+6. In the app's environment set `RENDER_WORKER_URL` (this service's URL) and
+   `RENDER_WORKER_SECRET`, and redeploy the app.
+
+## Verify a deployment
+
+- `GET /health` → `{ "ok": true, "busy": false }`.
+- In the app's **Admin** view, "Worker last claimed" updates after you upload a
+  recording, and the queue drains.
+- Upload a short recording with Hindi or Kannada speech, export a clip, and
+  check the burned-in captions show the script correctly and follow the speech.
+
+## Pinned tools
+
+`Dockerfile` pins yt-dlp, Deno, whisper.cpp and the model by build argument, and
+`package-lock.json` pins the Node dependencies. Upgrade deliberately: bump the
+argument, rebuild, and re-run the verification above.

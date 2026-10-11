@@ -1,71 +1,54 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace, audit } from '@/lib/workspace';
+import { errorResponse, badRequest } from '@/lib/http';
+import { normalizeLanguage } from '@/services/pipeline';
 
-// Plain fields: only touched when the client sends them; '' clears.
-function field(v: unknown): string | null | undefined {
-  if (v === undefined) return undefined;
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
+const PLATFORMS = ['instagram', 'youtube', 'linkedin', 'twitter', 'tiktok'];
+const ORIENTATIONS = ['9:16', '1:1', '16:9'];
 
-// Secrets are never sent to the browser, so a blank input means "keep what's
-// saved". Sending null explicitly clears it.
-function secret(v: unknown): string | null | undefined {
-  if (v === null) return null;
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
-}
+const text = (v: unknown, max: number) => (v === undefined ? undefined : typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
+/** Workspace brand + default output preferences (admins), and workspace name/retention. */
 export async function POST(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
-    const body = await req.json();
+    const ctx = await requireWorkspace({ role: 'admin' });
+    const body = await req.json().catch(() => ({}));
 
-    const normalizedProvider = ['openai', 'gemini', 'groq'].includes(body.aiProvider) ? body.aiProvider : undefined;
+    const pick = (v: unknown, allowed: string[]) =>
+      Array.isArray(v) ? JSON.stringify(v.filter((x) => allowed.includes(x))) : undefined;
 
     const data = {
-      youtubeId: field(body.youtubeId),
-      instagramId: field(body.instagramId),
-      aiProvider: normalizedProvider,
-      aiModel: field(body.aiModel),
-      youtubeClientId: field(body.youtubeClientId),
-      brandName: field(body.brandName),
-      brandNiche: field(body.brandNiche),
-      brandTone: field(body.brandTone),
-      targetAudience: field(body.targetAudience),
-      videoStyle: field(body.videoStyle),
-      captionStyle: field(body.captionStyle),
-      defaultPlatforms: Array.isArray(body.defaultPlatforms) ? JSON.stringify(body.defaultPlatforms) : undefined,
-      defaultOrientations: Array.isArray(body.defaultOrientations) ? JSON.stringify(body.defaultOrientations) : undefined,
-
-      openAiKey: secret(body.openAiKey),
-      aiApiKey: secret(body.aiApiKey),
-      youtubeClientSecret: secret(body.youtubeClientSecret),
-      instagramAccessToken: secret(body.instagramAccessToken),
-      youtubeDataApiKey: secret(body.youtubeDataApiKey),
-      discordWebhookUrl: secret(body.discordWebhookUrl),
-      pexelsApiKey: secret(body.pexelsApiKey),
-      elevenLabsApiKey: secret(body.elevenLabsApiKey),
-      pixabayApiKey: secret(body.pixabayApiKey),
+      brandName: text(body.brandName, 80),
+      brandNiche: text(body.brandNiche, 120),
+      brandTone: text(body.brandTone, 120),
+      targetAudience: text(body.targetAudience, 160),
+      captionStyle: body.captionStyle === undefined ? undefined : body.captionStyle === 'Minimalist' ? 'Minimalist' : 'Dynamic Pop',
+      defaultLanguage: body.defaultLanguage === undefined ? undefined : normalizeLanguage(body.defaultLanguage),
+      defaultPlatforms: pick(body.defaultPlatforms, PLATFORMS),
+      defaultOrientations: pick(body.defaultOrientations, ORIENTATIONS),
     };
-
-    if (data.discordWebhookUrl && !/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//.test(data.discordWebhookUrl)) {
-      return NextResponse.json({ success: false, error: 'That doesn\'t look like a Discord webhook URL.' }, { status: 400 });
-    }
-
     await prisma.settings.upsert({
-      where: { id: 'default' },
+      where: { workspaceId: ctx.workspaceId },
       update: data,
-      create: {
-        id: 'default',
-        ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null)),
-      },
+      create: { workspaceId: ctx.workspaceId, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)) },
     });
 
+    const ws: { name?: string; retentionDays?: number } = {};
+    if (typeof body.workspaceName === 'string') {
+      if (!body.workspaceName.trim()) throw badRequest('Workspace name can’t be empty.');
+      ws.name = body.workspaceName.trim().slice(0, 80);
+    }
+    if (body.retentionDays !== undefined) {
+      const days = Number(body.retentionDays);
+      if (![7, 14, 30, 60, 90].includes(days)) throw badRequest('Choose a supported retention period.');
+      ws.retentionDays = days;
+    }
+    if (Object.keys(ws).length) await prisma.workspace.update({ where: { id: ctx.workspaceId }, data: ws });
+    const changed = [...Object.entries(data).filter(([, v]) => v !== undefined).map(([k]) => k), ...Object.keys(ws)];
+    await audit(ctx, 'settings.update', { fields: changed });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Saving settings failed:', error);
-    return NextResponse.json({ success: false, error: 'Could not save settings.' }, { status: 500 });
+    return errorResponse(error, 'Could not save settings.', 'api/settings');
   }
 }

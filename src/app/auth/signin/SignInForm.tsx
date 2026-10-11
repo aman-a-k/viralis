@@ -17,7 +17,8 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(searchParams.get("mode") === "signup" ? "signup" : "signin");
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +29,9 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
   const authError = searchParams.get("error");
   React.useEffect(() => {
     if (authError === "AccessDenied") {
-      toast.error("That Google account isn't invited to this workspace.", { id: "auth-error" });
+      toast.error("Sign-up is invite-only right now.", { id: "auth-error" });
+    } else if (authError === "OAuthAccountNotLinked") {
+      toast.error("This email already has a password account. Sign in with your password.", { id: "auth-error", duration: 8000 });
     } else if (authError) {
       toast.error("Sign-in failed. Please try again.", { id: "auth-error" });
     }
@@ -36,7 +39,14 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
 
   const finish = (res: { error?: string | null; ok?: boolean } | undefined) => {
     if (res?.error) {
-      toast.error(res.error === "CredentialsSignin" ? "Invalid email or password." : res.error);
+      toast.error(
+        res.error === "CredentialsSignin"
+          ? "Invalid email or password."
+          : res.error === "TooManyAttempts"
+            ? "Too many failed attempts. Wait 15 minutes, or reset your password."
+            : "Sign-in failed. Please try again.",
+        { duration: 7000 }
+      );
       return false;
     }
     // full navigation so the new session is picked up cleanly
@@ -53,14 +63,14 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
         const res = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, email, password }),
+          body: JSON.stringify({ name, email, password, acceptTerms }),
         });
         const data = await res.json();
         if (!data.success) {
           toast.error(data.error || "Could not create account.");
           return;
         }
-        toast.success("Account created.");
+        toast.success(data.emailSent === false ? "Account created." : `Account created — we sent a confirmation link to ${email}.`, { duration: 7000 });
       }
       const res = await signIn("credentials", { email, password, redirect: false });
       finish(res ?? undefined);
@@ -109,8 +119,8 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
           </h1>
           <p className="text-muted" style={{ fontSize: "0.8125rem", marginBottom: "1.25rem" }}>
             {mode === "signin"
-              ? "Access your repurposing studio and distribution pipeline."
-              : "Start turning long-form video into multi-platform shorts."}
+              ? "Welcome back."
+              : "Free trial included — no card needed."}
           </p>
 
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
@@ -146,16 +156,25 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
                 id="password"
                 type="password"
                 required
-                minLength={8}
+                minLength={mode === "signup" ? 10 : undefined}
                 className="input-field"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 8 characters"
+                placeholder={mode === "signup" ? "At least 10 characters" : ""}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" disabled={busy} style={{ width: "100%", marginTop: "0.25rem" }}>
+            {mode === "signin" && (
+              <a href="/auth/forgot" className="link" style={{ fontSize: "0.75rem", alignSelf: "flex-end" }}>Forgot password?</a>
+            )}
+            {mode === "signup" && (
+              <label className="check-row" style={{ fontSize: "0.78rem" }}>
+                <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} required />
+                <span>I agree to the <a className="link" href="/terms" target="_blank">Terms</a> and <a className="link" href="/privacy" target="_blank">Privacy Policy</a>.</span>
+              </label>
+            )}
+            <button type="submit" className="btn btn-primary" disabled={busy || (mode === "signup" && !acceptTerms)} style={{ width: "100%", marginTop: "0.25rem" }}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
               {mode === "signin" ? "Sign in" : "Create account"}
             </button>
@@ -177,7 +196,7 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
             )}
             {devLoginAvailable && (
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => handleProvider("dev")} style={{ width: "100%" }}>
-                Developer bypass (skip login)
+                Developer sign-in (local only)
               </button>
             )}
           </div>

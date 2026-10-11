@@ -1,22 +1,18 @@
 import { NextResponse } from 'next/server';
-import { requireSession } from '@/lib/apiAuth';
+import { requireWorkspace } from '@/lib/workspace';
+import { errorResponse, HttpError } from '@/lib/http';
 import { refreshTrendRadar } from '@/services/googleTrends';
 
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  const auth = await requireSession();
-  if (auth instanceof NextResponse) return auth;
-
   try {
+    const ctx = await requireWorkspace();
     const body = await req.json().catch(() => ({}));
-    const result = await refreshTrendRadar({ geo: typeof body.region === 'string' ? body.region : undefined });
+    const result = await refreshTrendRadar(ctx.workspaceId, { geo: typeof body.region === 'string' ? body.region : undefined });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
-    console.error('[API /api/trends/refresh]', error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Could not refresh trends.' },
-      { status: 502 }
-    );
+    if (error instanceof Error && /Google Trends/.test(error.message)) return errorResponse(new HttpError(502, error.message));
+    return errorResponse(error, 'Could not refresh trends.', 'api/trends/refresh');
   }
 }

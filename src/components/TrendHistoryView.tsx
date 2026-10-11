@@ -49,11 +49,12 @@ export const TrendHistoryView: React.FC<Props> = ({ trends, onRefreshed }) => {
     }
   };
 
-  const safeParseJSON = (str: string, fallback: any = []) => {
+  const parseKeywords = (str: string): string[] => {
     try {
-      return JSON.parse(str);
-    } catch (e) {
-      return fallback;
+      const v = JSON.parse(str);
+      return Array.isArray(v) ? v.map(String) : [];
+    } catch {
+      return [];
     }
   };
 
@@ -92,7 +93,7 @@ export const TrendHistoryView: React.FC<Props> = ({ trends, onRefreshed }) => {
           </div>
         ) : (
           trends.map((trend) => {
-            const keywords = safeParseJSON(trend.keywords, []);
+            const keywords = parseKeywords(trend.keywords);
 
             return (
               <div key={trend.id} className="panel-card">

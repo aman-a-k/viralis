@@ -1,10 +1,7 @@
 import { YoutubeTranscript } from 'youtube-transcript';
+import type { TranscriptSegment } from '../lib/captions';
 
-export interface TranscriptSegment {
-  text: string;
-  start: number; // seconds
-  end: number; // seconds
-}
+export type { TranscriptSegment };
 
 export interface YouTubeVideoData {
   videoId: string;
@@ -101,7 +98,7 @@ export async function fetchYouTubeMetadata(url: string): Promise<YouTubeMetadata
  * No video download — uses the public oEmbed endpoint plus the caption track.
  * Throws if no transcript is reachable this way (YouTube regularly blocks
  * this from cloud IPs) — callers should fall back to worker-based
- * transcription (see RepurposingService.ingestYouTube) when that happens.
+ * transcription (see pipeline.ts) when that happens.
  */
 export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> {
   const { videoId, url: canonicalUrl, title, author, thumbnail } = await fetchYouTubeMetadata(url);
@@ -154,19 +151,6 @@ export async function fetchYouTubeVideo(url: string): Promise<YouTubeVideoData> 
   };
 }
 
-/** Compact a timestamped transcript into a token for the LLM prompt. */
-export function transcriptToPromptText(transcript: TranscriptSegment[], maxChars = 12000): string {
-  const lines: string[] = [];
-  let total = 0;
-  for (const seg of transcript) {
-    const line = `[${formatTimestamp(seg.start)}] ${seg.text}`;
-    if (total + line.length > maxChars) break;
-    lines.push(line);
-    total += line.length + 1;
-  }
-  return lines.join('\n');
-}
-
 export function formatTimestamp(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
@@ -176,11 +160,25 @@ export function formatTimestamp(seconds: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-/** Pull the transcript text that falls within a [start, end] window. */
-export function transcriptSlice(transcript: TranscriptSegment[], start: number, end: number): string {
-  return transcript
-    .filter((s) => s.end > start && s.start < end)
-    .map((s) => s.text)
-    .join(' ')
-    .trim();
+/**
+ * A video's length from the YouTube Data API, or null if it can't be read
+ * (no API key, private video). Used to check processing allowance before any
+ * work starts on a YouTube link.
+ */
+export async function fetchYouTubeDurationSeconds(videoId: string): Promise<number | null> {
+  const key = process.env.YOUTUBE_API_KEY;
+  if (!key) return null;
+  try {
+    const params = new URLSearchParams({ part: 'contentDetails', id: videoId, key });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const iso: string | undefined = (await res.json()).items?.[0]?.contentDetails?.duration;
+    if (!iso) return null;
+    const m = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!m) return null;
+    const [, d, h, min, s] = m;
+    return (Number(d) || 0) * 86400 + (Number(h) || 0) * 3600 + (Number(min) || 0) * 60 + (Number(s) || 0);
+  } catch {
+    return null;
+  }
 }
