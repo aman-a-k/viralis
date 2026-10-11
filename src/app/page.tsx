@@ -408,7 +408,7 @@ export default function Dashboard() {
                 {activeTab === 'autopilot' && "Scan trends and autonomously write a script, then send it to your Approval Queue for review."}
                 {activeTab === 'queue' && "Review repurposed clips and autonomous scripts before they publish."}
                 {activeTab === 'learning-loop' && "Real performance of your published clips — watch-through, winning hook styles, and drop-offs."}
-                {activeTab === 'trends' && "Trending topics Autopilot has picked up from Google Trends."}
+                {activeTab === 'trends' && "Live Google search trends, scored for your niche."}
                 {activeTab === 'agents' && "Multi-agent execution across highlight detection, editing, and distribution."}
                 {activeTab === 'settings' && "API keys, OAuth connections, and brand voice."}
                 {activeTab === 'content' && "Every rendered clip and autopilot video in one catalog."}
@@ -670,7 +670,7 @@ export default function Dashboard() {
 
           {/* TREND RADAR TAB */}
           {activeTab === 'trends' && (
-            <TrendHistoryView trends={data?.trends || []} />
+            <TrendHistoryView trends={data?.trends || []} onRefreshed={() => fetchData()} />
           )}
 
           {/* AI AGENTS TAB */}

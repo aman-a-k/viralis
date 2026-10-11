@@ -130,6 +130,10 @@ export function RepurposeStudioView({
   const [vibeFilter, setVibeFilter] = useState<Vibe | 'all'>('all');
   const [trendingVideos, setTrendingVideos] = useState<TrendingVideo[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
+  const [trendingNextPage, setTrendingNextPage] = useState<string | null>(null);
+  const [trendingFetchedAt, setTrendingFetchedAt] = useState<string | null>(null);
+  const [trendingNotice, setTrendingNotice] = useState<string | null>(null);
+  const [trendingError, setTrendingError] = useState<string | null>(null);
   const [automating, setAutomating] = useState(false);
   const [autoStatus, setAutoStatus] = useState(AUTOMATIC_STATUSES[0]);
   const [lastAutoResult, setLastAutoResult] = useState<{ title: string; channel: string; clipsCreated: number; clipsQueued: number } | null>(null);
@@ -163,36 +167,50 @@ export function RepurposeStudioView({
     captionStyle,
   });
 
-  const findTrending = async () => {
+  // Refresh keeps the current list on screen until the new one arrives, and
+  // a failed refresh leaves it in place with the error shown alongside —
+  // previously the list was cleared first, so any API hiccup (or a
+  // region/category pair YouTube has no chart for) left an empty panel.
+  const findTrending = async (opts: { append?: boolean } = {}) => {
+    if (opts.append && !trendingNextPage) return;
     setTrendingLoading(true);
-    setTrendingVideos([]);
+    setTrendingError(null);
     try {
       const params = new URLSearchParams({ region, limit: '15' });
       if (category) params.set('category', category);
-      const res = await fetch(`/api/trends/videos?${params}`);
+      if (opts.append && trendingNextPage) params.set('pageToken', trendingNextPage);
+      const res = await fetch(`/api/trends/videos?${params}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
-        setTrendingVideos(data.videos);
-        if (data.videos.length === 0) toast('No trending videos returned for that filter.');
+        setTrendingVideos((prev) => {
+          if (!opts.append) return data.videos;
+          const seen = new Set(prev.map((v) => v.videoId));
+          return [...prev, ...data.videos.filter((v: TrendingVideo) => !seen.has(v.videoId))];
+        });
+        setTrendingNextPage(data.nextPageToken || null);
+        setTrendingFetchedAt(data.fetchedAt || new Date().toISOString());
+        setTrendingNotice(data.notice || null);
+        if (!opts.append && data.videos.length === 0) toast('No trending videos returned for that filter.');
       } else {
-        toast.error(data.error || 'Could not fetch trending videos.', { duration: 7000 });
+        const message = data.error || 'Could not fetch trending videos.';
+        setTrendingError(message);
+        toast.error(message, { duration: 7000 });
       }
     } catch {
+      setTrendingError('Network error fetching trending videos.');
       toast.error('Network error fetching trending videos.');
     } finally {
       setTrendingLoading(false);
     }
   };
 
-  // Auto-load trending videos the moment this tab is opened, instead of
-  // making the user press "Find trending videos" first — the button then
-  // doubles as a manual refresh (still honoring the region/category filters).
+  // Load as soon as the Browse tab opens, and again whenever the region or
+  // category changes — the filters used to do nothing until Refresh was
+  // pressed.
   useEffect(() => {
-    if (mode === 'browse' && trendingVideos.length === 0 && !trendingLoading) {
-      findTrending();
-    }
+    if (mode === 'browse') findTrending();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, region, category]);
 
   const visibleTrending = vibeFilter === 'all' ? trendingVideos : trendingVideos.filter((v) => v.vibe === vibeFilter);
 
@@ -702,11 +720,22 @@ export function RepurposeStudioView({
                   <select className="input-field" style={{ width: 180 }} value={category} onChange={(e) => setCategory(e.target.value)}>
                     {CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                   </select>
-                  <button type="button" className="btn btn-secondary" onClick={findTrending} disabled={trendingLoading}>
+                  <button type="button" className="btn btn-secondary" onClick={() => findTrending()} disabled={trendingLoading}>
                     {trendingLoading ? <RefreshCw size={14} className="animate-spin" /> : <Radar size={14} />}
                     {trendingLoading ? 'Finding…' : trendingVideos.length > 0 ? 'Refresh' : 'Find trending videos'}
                   </button>
+                  {trendingFetchedAt && !trendingLoading && (
+                    <span className="text-subtle" style={{ fontSize: '0.7rem' }} aria-live="polite">
+                      Updated {new Date(trendingFetchedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · YouTube refreshes this chart a few times a day
+                    </span>
+                  )}
                 </div>
+                {trendingNotice && (
+                  <p className="text-subtle" style={{ fontSize: '0.75rem' }} role="status">{trendingNotice}</p>
+                )}
+                {trendingError && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--red)' }} role="alert">{trendingError}</p>
+                )}
 
                 {trendingVideos.length > 0 && (
                   <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
@@ -772,6 +801,11 @@ export function RepurposeStudioView({
                       );
                     })}
                   </div>
+                )}
+                {mode === 'browse' && trendingNextPage && trendingVideos.length > 0 && (
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'center' }} onClick={() => findTrending({ append: true })} disabled={trendingLoading}>
+                    {trendingLoading ? <RefreshCw size={12} className="animate-spin" /> : null} Load more
+                  </button>
                 )}
               </>
             )}

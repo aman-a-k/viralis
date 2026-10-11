@@ -770,3 +770,16 @@ textarea.input-field { line-height: 1.55; resize: vertical; }
   .landing-nav { padding: 1rem 1.25rem; }
   .landing-footer { flex-direction: column; align-items: flex-start; }
 }
+
+/* Visually hidden but available to screen readers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

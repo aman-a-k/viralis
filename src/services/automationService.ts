@@ -31,7 +31,7 @@ export async function runAutomaticDiscovery(
   const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
   const niche = settings?.brandNiche || 'technology and internet culture';
 
-  const videos = await fetchTrendingVideos({
+  const { videos } = await fetchTrendingVideos({
     regionCode: config.region,
     categoryId: config.category,
     maxResults: 15,

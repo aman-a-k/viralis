@@ -8,12 +8,13 @@ export async function GET(req: Request) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const videos = await fetchTrendingVideos({
+    const page = await fetchTrendingVideos({
       regionCode: searchParams.get('region') || undefined,
       categoryId: searchParams.get('category') || undefined,
       maxResults: Number(searchParams.get('limit')) || undefined,
+      pageToken: searchParams.get('pageToken') || undefined,
     });
-    return NextResponse.json({ success: true, videos });
+    return NextResponse.json({ success: true, ...page });
   } catch (error: unknown) {
     const status = error instanceof MissingYouTubeKeyError ? 424 : 500;
     return NextResponse.json(

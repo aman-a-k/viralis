@@ -1,5 +1,6 @@
-import React from 'react';
-import { TrendingUp, Calendar, Zap, MessageSquare } from 'lucide-react';
+import React, { useState } from 'react';
+import toast from 'react-hot-toast';
+import { TrendingUp, Calendar, MessageSquare, RefreshCw } from 'lucide-react';
 
 interface TrendRecord {
   id: string;
@@ -13,9 +14,41 @@ interface TrendRecord {
 
 interface Props {
   trends: TrendRecord[];
+  onRefreshed?: () => void;
 }
 
-export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
+const REGIONS: [string, string][] = [
+  ['US', 'United States'], ['IN', 'India'], ['GB', 'United Kingdom'], ['CA', 'Canada'],
+  ['AU', 'Australia'], ['DE', 'Germany'], ['FR', 'France'], ['BR', 'Brazil'], ['JP', 'Japan'],
+];
+
+export const TrendHistoryView: React.FC<Props> = ({ trends, onRefreshed }) => {
+  const [region, setRegion] = useState('US');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch('/api/trends/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        toast.error(data.error || 'Could not refresh trends.', { duration: 7000 });
+        return;
+      }
+      if (data.note) toast(data.note, { duration: 7000 });
+      else toast.success(`Pulled ${data.saved} live trends.`);
+      onRefreshed?.();
+    } catch {
+      toast.error('Network error refreshing trends.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const safeParseJSON = (str: string, fallback: any = []) => {
     try {
       return JSON.parse(str);
@@ -30,12 +63,22 @@ export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
         <div>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.25rem' }}>Trend Intelligence Log</h2>
           <p className="text-muted" style={{ fontSize: '0.85rem' }}>
-            Historical record of viral search spikes and AI viability analysis.
+            Today&apos;s real Google search trends, scored for fit with your niche.
           </p>
         </div>
-        <span className="badge badge-neutral" style={{ padding: '0.4rem 0.85rem' }}>
-          {trends.length} Logged Topics
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <label className="sr-only" htmlFor="trend-region">Region</label>
+          <select id="trend-region" className="input-field" style={{ width: 160 }} value={region} onChange={(e) => setRegion(e.target.value)}>
+            {REGIONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+          </select>
+          <button type="button" className="btn btn-primary" onClick={refresh} disabled={refreshing}>
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
+            {refreshing ? 'Refreshing…' : 'Refresh trends'}
+          </button>
+          <span className="badge badge-neutral" style={{ padding: '0.4rem 0.85rem' }}>
+            {trends.length} topics
+          </span>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -44,7 +87,7 @@ export const TrendHistoryView: React.FC<Props> = ({ trends }) => {
             <TrendingUp size={32} color="var(--foreground-subtle)" style={{ marginBottom: '0.75rem' }} />
             <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.35rem' }}>No Trends Recorded</h3>
             <p className="text-muted" style={{ fontSize: '0.85rem' }}>
-              Run the automated workflow cycle to fetch and evaluate current Google Trends.
+              Press Refresh trends to pull today&apos;s Google search trends for your region.
             </p>
           </div>
         ) : (

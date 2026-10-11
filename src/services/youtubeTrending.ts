@@ -54,47 +54,101 @@ function parseIsoDuration(iso: string): number {
   return (Number(h) || 0) * 3600 + (Number(min) || 0) * 60 + (Number(s) || 0);
 }
 
+/**
+ * The Data API key is platform configuration, not something each customer
+ * should have to create. The env key wins; a key saved in Settings is only a
+ * fallback for self-hosted installs without one (a stale saved key used to
+ * override a working env key and break trending for everyone).
+ */
 async function getApiKey(): Promise<string | null> {
+  if (process.env.YOUTUBE_API_KEY) return process.env.YOUTUBE_API_KEY;
   const settings = await prisma.settings.findFirst({ where: { id: 'default' } });
-  return settings?.youtubeDataApiKey || process.env.YOUTUBE_API_KEY || null;
+  return settings?.youtubeDataApiKey || null;
 }
 
-/** Real trending videos from the YouTube Data API (chart=mostPopular). */
+export interface TrendingPage {
+  videos: TrendingVideo[];
+  nextPageToken: string | null;
+  fetchedAt: string;
+  /** Set when the requested filter had to be widened to return anything. */
+  notice?: string;
+}
+
+async function requestChart(apiKey: string, regionCode: string, categoryId: string | undefined, maxResults: number, pageToken?: string) {
+  const params = new URLSearchParams({
+    part: 'snippet,contentDetails,statistics',
+    chart: 'mostPopular',
+    regionCode,
+    maxResults: String(maxResults),
+    key: apiKey,
+  });
+  if (categoryId) params.set('videoCategoryId', categoryId);
+  if (pageToken) params.set('pageToken', pageToken);
+
+  return fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
+    signal: AbortSignal.timeout(15000),
+    cache: 'no-store',
+  });
+}
+
+async function describeApiFailure(res: Response): Promise<Error> {
+  const body = await res.json().catch(() => ({}));
+  const reason = body?.error?.message || `HTTP ${res.status}`;
+  if (res.status === 403) return new Error(`YouTube API rejected the request: ${reason}`);
+  return new Error(`YouTube API error: ${reason}`);
+}
+
+/**
+ * Real trending videos from the YouTube Data API (chart=mostPopular).
+ *
+ * YouTube only publishes a "most popular" chart for some category+region
+ * pairs (e.g. Education in India returns 404 "Requested entity was not
+ * found"). Instead of surfacing that as a hard error — which left the list
+ * empty and made Refresh look broken — fall back to the region's overall
+ * chart filtered to the category, then to the overall chart.
+ */
 export async function fetchTrendingVideos(opts: {
   regionCode?: string;
   categoryId?: string;
   maxResults?: number;
-} = {}): Promise<TrendingVideo[]> {
+  pageToken?: string;
+} = {}): Promise<TrendingPage> {
   const apiKey = await getApiKey();
   if (!apiKey) throw new MissingYouTubeKeyError();
 
-  const params = new URLSearchParams({
-    part: 'snippet,contentDetails,statistics',
-    chart: 'mostPopular',
-    regionCode: opts.regionCode || 'US',
-    maxResults: String(Math.min(30, Math.max(1, opts.maxResults || 15))),
-    key: apiKey,
-  });
-  if (opts.categoryId) params.set('videoCategoryId', opts.categoryId);
+  const regionCode = /^[A-Z]{2}$/.test(opts.regionCode || '') ? (opts.regionCode as string) : 'US';
+  const categoryId = opts.categoryId && /^\d+$/.test(opts.categoryId) ? opts.categoryId : undefined;
+  const maxResults = Math.min(50, Math.max(1, opts.maxResults || 15));
+  let notice: string | undefined;
 
-  const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
-    signal: AbortSignal.timeout(15000),
-    cache: 'no-store',
-  });
+  let res = await requestChart(apiKey, regionCode, categoryId, maxResults, opts.pageToken);
+  let items: any[] = [];
+  let nextPageToken: string | null = null;
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const reason = body?.error?.message || `HTTP ${res.status}`;
-    if (res.status === 403) throw new Error(`YouTube API rejected the key: ${reason}`);
-    throw new Error(`YouTube API error: ${reason}`);
+  if (res.status === 404 && categoryId) {
+    // No chart for this category here — scan the region's overall chart for it.
+    const label = TRENDING_CATEGORIES[categoryId] || 'this category';
+    res = await requestChart(apiKey, regionCode, undefined, 50);
+    if (!res.ok) throw await describeApiFailure(res);
+    const all: any[] = (await res.json()).items || [];
+    const matching = all.filter((v) => v.snippet?.categoryId === categoryId);
+    if (matching.length) {
+      items = matching.slice(0, maxResults);
+      notice = `YouTube has no separate ${label} chart for this region, so these are the ${label} videos from its overall trending list.`;
+    } else {
+      items = all.slice(0, maxResults);
+      notice = `YouTube has no ${label} trending chart for this region right now — showing overall trending instead.`;
+    }
+  } else {
+    if (!res.ok) throw await describeApiFailure(res);
+    const data = await res.json();
+    items = data.items || [];
+    nextPageToken = data.nextPageToken || null;
   }
 
-  const data = await res.json();
-  const items: any[] = data.items || [];
-
-  return items.map((v) => {
+  const videos = items.map((v) => {
     const title: string = v.snippet?.title || 'Untitled';
-    const categoryId: string = v.snippet?.categoryId || '';
+    const vCategory: string = v.snippet?.categoryId || '';
     const durationSeconds = parseIsoDuration(v.contentDetails?.duration || 'PT0S');
     return {
       videoId: v.id,
@@ -106,10 +160,12 @@ export async function fetchTrendingVideos(opts: {
       likeCount: Number(v.statistics?.likeCount || 0),
       durationSeconds,
       publishedAt: v.snippet?.publishedAt || '',
-      categoryId,
-      vibe: classifyVibe(title, categoryId, durationSeconds),
+      categoryId: vCategory,
+      vibe: classifyVibe(title, vCategory, durationSeconds),
     };
   });
+
+  return { videos, nextPageToken, fetchedAt: new Date().toISOString(), notice };
 }
 
 /**
