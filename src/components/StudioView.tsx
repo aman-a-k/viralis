@@ -133,7 +133,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
       const { upload } = await import('@vercel/blob/client');
       const safe = file.name.normalize('NFKD').replace(/[^\w.-]+/g, '_').slice(-80) || 'recording.mp4';
       const blob = await upload(`ws/${data.workspace.id}/sources/${safe}`, file, {
-        access: 'private',
+        access: data.capabilities.storageAccess,
         handleUploadUrl: '/api/repurpose/upload-token',
         multipart: file.size > 50 * 1024 * 1024,
         onUploadProgress: ({ percentage }) => setProgress(Math.round(percentage)),

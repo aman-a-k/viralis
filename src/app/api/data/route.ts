@@ -7,6 +7,7 @@ import { serializeProject } from '@/services/pipeline';
 import { getConnection, platformOAuthConfigured } from '@/services/youtubeConnection';
 import { emailConfigured } from '@/lib/email';
 import { billingConfigured } from '@/services/billing';
+import { blobAccess } from '@/lib/storage';
 
 export async function GET() {
   try {
@@ -83,6 +84,7 @@ export async function GET() {
           youtubeConnect: platformOAuthConfigured(),
           billing: billingConfigured(),
           email: emailConfigured(),
+          storageAccess: blobAccess(),
         },
         settings: {
           brandName: settings?.brandName || '',

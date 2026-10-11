@@ -140,7 +140,7 @@ export interface DashboardData {
   stats: { projects: number; clipsFound: number; clipsExported: number; clipsPublished: number; avgWatchThrough: number | null };
   plan: PlanSummary;
   channel: { connected: boolean; title?: string | null; status?: string; lastError?: string | null; legacy?: boolean };
-  capabilities: { youtubeConnect: boolean; billing: boolean; email: boolean };
+  capabilities: { youtubeConnect: boolean; billing: boolean; email: boolean; storageAccess: 'private' | 'public' };
   settings: WorkspaceSettings;
   trends: TrendRecord[];
   approvalQueue: ApprovalItem[];
