@@ -47,7 +47,7 @@ export default function PrivacyPage() {
       <p>Each workspace’s data is isolated from others, files are stored privately and only reachable through short-lived signed links, and third-party tokens are encrypted. No system is perfectly secure; if a breach affects you we’ll tell you promptly.</p>
 
       <h2>Grievance officer and contact</h2>
-      <p>{BUSINESS.operator}, {BUSINESS.city} · <a href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a> · {BUSINESS.phone}. We respond within 7 days.</p>
+      <p>{BUSINESS.operator}, {BUSINESS.city} · <a href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a>. We respond within 7 days.</p>
     </LegalPage>
   );
 }

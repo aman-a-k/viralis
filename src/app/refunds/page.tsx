@@ -20,7 +20,7 @@ export default function RefundsPage() {
       <h2>Failed renewals</h2>
       <p>If a renewal payment fails, Razorpay retries it for a few days and you keep access meanwhile. If it keeps failing, the subscription pauses and your workspace returns to no plan until you subscribe again. Your projects are kept (files follow the normal retention period).</p>
 
-      <p>Refund requests: <a href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a> or {BUSINESS.phone}.</p>
+      <p>Refund requests: <a href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a>.</p>
     </LegalPage>
   );
 }

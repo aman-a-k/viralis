@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { BrandMark } from './BrandMark';
-import { Upload, Scissors, Pencil, Download, ArrowRight, Phone, MapPin, Check, Languages, ShieldCheck } from 'lucide-react';
+import { Upload, Scissors, Pencil, Download, ArrowRight, MapPin, Check, Languages, ShieldCheck } from 'lucide-react';
 import { PLANS, formatInr } from '@/lib/plans';
 
 interface LandingPageProps {
@@ -10,8 +10,6 @@ interface LandingPageProps {
   onSignUp: () => void;
 }
 
-const PHONE_DISPLAY = '93427 39999';
-const PHONE_LINK = 'tel:+919342739999';
 // A real before/after example recorded with permission. Shown only when set.
 const DEMO_VIDEO = process.env.NEXT_PUBLIC_DEMO_VIDEO_URL;
 
@@ -52,9 +50,11 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
               <button type="button" onClick={onSignUp} className="btn btn-primary btn-lg">
-                Try it free on your recording <ArrowRight size={15} />
+                Register now <ArrowRight size={15} />
               </button>
-              <a href={PHONE_LINK} className="btn btn-secondary btn-lg"><Phone size={15} /> Call {PHONE_DISPLAY}</a>
+              <button type="button" onClick={onSignIn} className="btn btn-secondary btn-lg">
+                Sign in
+              </button>
             </div>
             <p style={{ fontSize: '0.8125rem', marginTop: '1rem' }} className="text-subtle">
               Free trial: {PLANS.trial.sourceMinutes} minutes of recording and {PLANS.trial.exports} video exports. No card needed.
@@ -123,9 +123,9 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
           <div className="panel-card" style={{ textAlign: 'center', padding: 'clamp(1.5rem, 5vw, 3rem)' }}>
             <h2 id="contact-h" className="landing-h2" style={{ marginBottom: '0.6rem' }}>Want to see it on your own recording first?</h2>
             <p className="text-muted" style={{ fontSize: '0.9375rem', maxWidth: 560, margin: '0 auto 1.25rem', lineHeight: 1.6 }}>
-              We’ll run one of your recordings with you on a call and show you the clips — and want to hear what’s wrong with them.
+              Register free, upload one of your recordings, and see the clips in minutes. No card needed.
             </p>
-            <a href={PHONE_LINK} className="btn btn-primary"><Phone size={15} /> Call Aman A K · {PHONE_DISPLAY}</a>
+            <button type="button" onClick={onSignUp} className="btn btn-primary">Register now <ArrowRight size={15} /></button>
             <p className="text-subtle" style={{ fontSize: '0.8125rem', marginTop: '1rem', display: 'flex', gap: '0.4rem', justifyContent: 'center', alignItems: 'center' }}>
               <MapPin size={13} /> Mangaluru, Karnataka
             </p>

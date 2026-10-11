@@ -7,7 +7,6 @@ export const BUSINESS = {
   operator: process.env.LEGAL_OPERATOR_NAME || 'Aman A K',
   city: 'Mangaluru, Karnataka, India',
   email: process.env.SUPPORT_EMAIL || 'support@example.com',
-  phone: '+91 93427 39999',
   updated: '11 October 2026',
 };
 

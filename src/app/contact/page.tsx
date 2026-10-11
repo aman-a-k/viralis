@@ -8,7 +8,6 @@ export default function ContactPage() {
       <p>We’re a small team and answer every message, usually within one working day.</p>
       <ul>
         <li>Email: <a href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a></li>
-        <li>Phone: <a href="tel:+919342739999">{BUSINESS.phone}</a> (Mon–Sat, 10am–7pm IST)</li>
         <li>Address: {BUSINESS.operator}, {BUSINESS.city}</li>
       </ul>
       <p>For a problem with a clip or project, include the project name and roughly when it happened so we can find it quickly.</p>
