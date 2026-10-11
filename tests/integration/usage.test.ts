@@ -73,3 +73,19 @@ describe.skipIf(!hasDb)('usage ledger', () => {
     await expect(reserveUsage(ws, 'exports', 1, { refType: 'clip' })).rejects.toMatchObject({ status: 402 });
   });
 });
+
+describe.skipIf(!hasDb)('upgrade with no existing accounts', () => {
+  beforeEach(resetDb);
+
+  it('the first admin to sign up becomes owner of the orphaned legacy workspace', async () => {
+    await prisma.workspace.create({ data: { id: 'ws_legacy', name: 'Legacy', retentionDays: 3650 } });
+    process.env.ADMIN_EMAILS = 'boss@example.com';
+    const other = await makeUser('someone@example.com');
+    expect(other.workspaceId).not.toBe('ws_legacy');
+    const admin = await makeUser('boss@example.com');
+    expect(admin.workspaceId).toBe('ws_legacy');
+    const second = await makeUser('boss2@example.com');
+    expect(second.workspaceId).not.toBe('ws_legacy');
+    delete process.env.ADMIN_EMAILS;
+  });
+});

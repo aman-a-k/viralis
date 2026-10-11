@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { authOptions } from './auth';
 import { prisma } from './prisma';
 import { HttpError, forbidden } from './http';
+import { emailConfigured } from './email';
 
 export type Role = 'owner' | 'admin' | 'member';
 const RANK: Record<Role, number> = { member: 1, admin: 2, owner: 3 };
@@ -35,6 +36,19 @@ export function isPlatformAdminEmail(email: string | null | undefined): boolean 
 export async function ensurePersonalWorkspace(userId: string, displayName?: string | null) {
   const existing = await prisma.membership.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' } });
   if (existing) return existing.workspaceId;
+
+  // Data from before workspaces existed lives in 'ws_legacy'. If no account
+  // existed at upgrade time it has no members; the first platform admin to
+  // sign up becomes its owner instead of starting from an empty workspace.
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (isPlatformAdminEmail(user?.email)) {
+    const legacy = await prisma.workspace.findUnique({ where: { id: 'ws_legacy' }, select: { id: true, _count: { select: { memberships: true } } } });
+    if (legacy && legacy._count.memberships === 0) {
+      await prisma.membership.create({ data: { workspaceId: legacy.id, userId, role: 'owner' } });
+      await prisma.settings.upsert({ where: { workspaceId: legacy.id }, update: {}, create: { workspaceId: legacy.id } });
+      return legacy.id;
+    }
+  }
 
   const name = displayName?.trim() ? `${displayName.trim().split(/\s+/)[0]}'s workspace` : 'My workspace';
   const ws = await prisma.workspace.create({
@@ -89,7 +103,9 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext | null> {
   return {
     userId,
     email: user.email,
-    emailVerified: !!user.emailVerified,
+    // Verification can only be required once email can actually be sent;
+    // platform admins are trusted.
+    emailVerified: !!user.emailVerified || isPlatformAdminEmail(user.email) || !emailConfigured(),
     workspaceId: active.workspaceId,
     workspaceName: active.workspace.name,
     role: (active.role as Role) || 'member',

@@ -105,3 +105,25 @@ describe.skipIf(!hasDb)('tenant isolation', () => {
     expect((await GET()).status).toBe(401);
   });
 });
+
+describe.skipIf(!hasDb)('email verification gate', () => {
+  beforeEach(resetDb);
+
+  it('blocks processing for unverified accounts only once email delivery is configured', async () => {
+    const u = await makeUser('new@example.com', { verified: false });
+    session.userId = u.user.id;
+    const { POST } = await import('@/app/api/repurpose/route');
+    const body = { transcriptText: 'x '.repeat(200) };
+
+    process.env.RESEND_API_KEY = 're_test';
+    process.env.EMAIL_FROM = 'Viralis <a@b.c>';
+    const blocked = await POST(json(body));
+    expect(blocked.status).toBe(403);
+    expect((await blocked.json()).code).toBe('email_unverified');
+
+    delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
+    const allowed = await POST(json(body));
+    expect(allowed.status).not.toBe(403);
+  });
+});
