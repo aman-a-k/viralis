@@ -2,13 +2,16 @@ import { NextResponse } from 'next/server';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { requireWorkspace } from '@/lib/workspace';
 import { getEntitlement } from '@/lib/usage';
-import { sourcePathPrefix } from '@/lib/storage';
+import { sourcePathPrefix, storageConfigured } from '@/lib/storage';
 
 // Issues a short-lived token so the browser uploads the recording straight to
 // Blob storage (serverless request bodies are capped at 4.5MB). The token is
 // only valid for this workspace's own sources/ folder and the plan's size cap.
 export async function POST(req: Request) {
   const body = (await req.json()) as HandleUploadBody;
+  if (!storageConfigured()) {
+    return NextResponse.json({ error: 'File uploads aren’t available right now. Use a YouTube link or paste a transcript instead.' }, { status: 503 });
+  }
   try {
     const result = await handleUpload({
       body,

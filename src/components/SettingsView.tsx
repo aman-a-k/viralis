@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { signOut } from 'next-auth/react';
-import { Save, RefreshCw, Link2, Unlink, Mail, Trash2, Download, UserPlus, KeyRound, Check } from 'lucide-react';
+import { Save, RefreshCw, Link2, Unlink, Mail, Trash2, Download, UserPlus, KeyRound, Check, Palette, MonitorPlay, Users, UserCircle } from 'lucide-react';
 import type { DashboardData } from '@/types';
 import { api, errorMessage, LANGUAGES } from '@/lib/client';
 
@@ -37,6 +37,31 @@ export function SettingsView({ data, onRefresh }: Props) {
   const [retention, setRetention] = useState(data.workspace.retentionDays);
   const retentionOptions = Array.from(new Set([7, 14, 30, 60, 90, data.workspace.retentionDays])).sort((a, b) => a - b);
   const [saving, setSaving] = useState(false);
+  const [section, setSection] = useState('set-brand');
+
+  const dirty =
+    workspaceName !== data.workspace.name || brandName !== s.brandName || brandNiche !== s.brandNiche || brandTone !== s.brandTone ||
+    audience !== s.targetAudience || language !== s.defaultLanguage || captionStyle !== s.captionStyle ||
+    retention !== data.workspace.retentionDays || [...platforms].sort().join() !== [...s.defaultPlatforms].sort().join();
+
+  const discard = () => {
+    setWorkspaceName(data.workspace.name); setBrandName(s.brandName); setBrandNiche(s.brandNiche); setBrandTone(s.brandTone);
+    setAudience(s.targetAudience); setLanguage(s.defaultLanguage); setCaptionStyle(s.captionStyle);
+    setPlatforms(s.defaultPlatforms); setRetention(data.workspace.retentionDays);
+  };
+
+  // Highlight the section in view in the side nav.
+  useEffect(() => {
+    const ids = ['set-brand', 'set-channel', 'set-members', 'set-account'];
+    const els = ids.map((id) => document.getElementById(id)?.closest('section, form')).filter(Boolean) as Element[];
+    const io = new IntersectionObserver((entries) => {
+      const top = entries.filter((en) => en.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      const id = top?.target.querySelector('h2')?.id;
+      if (id) setSection(id);
+    }, { rootMargin: '-80px 0px -55% 0px' });
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
 
   const [members, setMembers] = useState<MembersData | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -146,12 +171,30 @@ export function SettingsView({ data, onRefresh }: Props) {
     });
   };
 
+  const navItems: [string, string, React.ElementType][] = [
+    ['set-brand', 'Workspace & brand', Palette], ['set-channel', 'YouTube channel', MonitorPlay], ['set-members', 'Members', Users], ['set-account', 'Your account', UserCircle],
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: 820 }}>
+    <div className="settings-layout">
+      <nav className="settings-nav" aria-label="Settings sections">
+        {navItems.map(([id, label, Icon]) => (
+          <a key={id} href={`#${id}`} className={section === id ? 'active' : ''} aria-current={section === id ? 'true' : undefined}
+            onClick={(e) => { e.preventDefault(); setSection(id); document.getElementById(id)?.closest('section, form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            <Icon /> {label}
+          </a>
+        ))}
+      </nav>
+      <div className="settings-stack stagger">
       {/* Brand & defaults */}
-      <form className="panel-card settings-section" onSubmit={save} aria-labelledby="set-brand">
-        <h2 id="set-brand" className="section-title">Workspace &amp; brand</h2>
-        <p className="text-subtle" style={{ fontSize: '0.78rem' }}>Used to pick moments and write post captions in your voice.</p>
+      <form id="brand-form" className="panel-card settings-section" onSubmit={save} aria-labelledby="set-brand">
+        <div className="section-head">
+          <span className="section-icon"><Palette /></span>
+          <div>
+            <h2 id="set-brand" className="section-title">Workspace &amp; brand</h2>
+            <p>Used to pick moments and write post captions in your voice.</p>
+          </div>
+        </div>
         <fieldset disabled={!isAdmin} className="grid-cols-2 settings-fields">
           <div className="form-group"><label className="form-label" htmlFor="s-ws">Workspace name</label><input id="s-ws" className="input-field" value={workspaceName} maxLength={80} onChange={(e) => setWorkspaceName(e.target.value)} /></div>
           <div className="form-group"><label className="form-label" htmlFor="s-brand">Creator / brand name</label><input id="s-brand" className="input-field" value={brandName} maxLength={80} onChange={(e) => setBrandName(e.target.value)} /></div>
@@ -183,18 +226,21 @@ export function SettingsView({ data, onRefresh }: Props) {
           </fieldset>
         </fieldset>
         {isAdmin ? (
-          <button type="submit" className="btn btn-primary" disabled={saving} style={{ alignSelf: 'flex-start' }}>
-            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />} Save
+          <button type="submit" className="btn btn-primary" disabled={saving || !dirty} style={{ alignSelf: 'flex-start' }}>
+            {saving ? <RefreshCw size={14} className="animate-spin" /> : dirty ? <Save size={14} /> : <Check size={14} />} {dirty ? 'Save changes' : 'Saved'}
           </button>
         ) : <p className="text-subtle" style={{ fontSize: '0.75rem' }}>Ask a workspace admin to change these.</p>}
       </form>
 
       {/* Channel */}
       <section className="panel-card settings-section" aria-labelledby="set-channel">
-        <h2 id="set-channel" className="section-title">YouTube channel <span className="badge badge-neutral">Optional</span></h2>
-        <p className="text-subtle" style={{ fontSize: '0.78rem' }}>
-          Only needed to publish from Viralis and see how clips perform. You can always download clips and post them yourself.
-        </p>
+        <div className="section-head">
+          <span className="section-icon neutral"><MonitorPlay /></span>
+          <div>
+            <h2 id="set-channel" className="section-title">YouTube channel <span className="badge badge-neutral">Optional</span></h2>
+            <p>Only needed to publish from Viralis and see how clips perform. You can always download clips and post them yourself.</p>
+          </div>
+        </div>
         {data.channel.connected ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <span className="badge badge-success"><Check size={11} /> Connected{data.channel.title ? ` · ${data.channel.title}` : ''}</span>
@@ -223,7 +269,13 @@ export function SettingsView({ data, onRefresh }: Props) {
 
       {/* Members */}
       <section className="panel-card settings-section" aria-labelledby="set-members">
-        <h2 id="set-members" className="section-title">Members</h2>
+        <div className="section-head">
+          <span className="section-icon neutral"><Users /></span>
+          <div>
+            <h2 id="set-members" className="section-title">Members</h2>
+            <p>Everyone here shares this workspace’s projects, review queue and channel.</p>
+          </div>
+        </div>
         {members && members.workspaces.length > 1 && (
           <div className="form-group" style={{ maxWidth: 320 }}>
             <label className="form-label" htmlFor="s-switch">Switch workspace</label>
@@ -235,7 +287,10 @@ export function SettingsView({ data, onRefresh }: Props) {
         <ul className="member-list">
           {members?.members.map((m) => (
             <li key={m.id}>
-              <span className="truncate">{m.name || m.email}{m.you && <span className="text-subtle"> (you)</span>}<br /><span className="text-subtle" style={{ fontSize: '0.72rem' }}>{m.email}</span></span>
+              <span className="member-who">
+                <span className="member-avatar" aria-hidden="true">{(m.name || m.email || '?')[0].toUpperCase()}</span>
+                <span className="truncate">{m.name || m.email}{m.you && <span className="text-subtle"> (you)</span>}<br /><span className="text-subtle" style={{ fontSize: '0.72rem' }}>{m.email}</span></span>
+              </span>
               {data.user.role === 'owner' && m.role !== 'owner' ? (
                 <select className="input-field select-sm" aria-label={`Role for ${m.email}`} value={m.role} onChange={(e) => changeRole(m.id, e.target.value)}>
                   <option value="admin">Admin</option><option value="member">Member</option>
@@ -250,7 +305,10 @@ export function SettingsView({ data, onRefresh }: Props) {
           ))}
           {members?.invites.map((i) => (
             <li key={i.id}>
-              <span className="truncate">{i.email}<br /><span className="text-subtle" style={{ fontSize: '0.72rem' }}>Invited · {i.role}</span></span>
+              <span className="member-who">
+                <span className="member-avatar" aria-hidden="true" style={{ borderStyle: 'dashed', background: 'transparent' }}><Mail size={12} /></span>
+                <span className="truncate">{i.email}<br /><span className="text-subtle" style={{ fontSize: '0.72rem' }}>Invited · {i.role}</span></span>
+              </span>
               <span className="badge badge-warning">Pending</span>
               {isAdmin && <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeMember({ inviteId: i.id }, `Revoke the invite for ${i.email}?`)}>Revoke</button>}
             </li>
@@ -276,7 +334,13 @@ export function SettingsView({ data, onRefresh }: Props) {
 
       {/* Account */}
       <section className="panel-card settings-section" aria-labelledby="set-account">
-        <h2 id="set-account" className="section-title">Your account</h2>
+        <div className="section-head">
+          <span className="section-icon neutral"><UserCircle /></span>
+          <div>
+            <h2 id="set-account" className="section-title">Your account</h2>
+            <p>Sign-in, your data, and deleting your account.</p>
+          </div>
+        </div>
         <p style={{ fontSize: '0.85rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <Mail size={14} /> {data.user.email}
           {data.user.emailVerified ? <span className="badge badge-success">Verified</span> : (
@@ -310,6 +374,19 @@ export function SettingsView({ data, onRefresh }: Props) {
           </form>
         </details>
       </section>
+
+      {isAdmin && dirty && (
+        <div className="save-bar" role="status">
+          <p>You have unsaved changes</p>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={discard} disabled={saving}>Discard</button>
+            <button type="submit" form="brand-form" className="btn btn-primary btn-sm" disabled={saving}>
+              {saving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />} Save changes
+            </button>
+          </div>
+        </div>
+      )}
+      </div>
     </div>
   );
 }

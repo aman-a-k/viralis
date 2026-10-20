@@ -7,7 +7,8 @@ import { serializeProject } from '@/services/pipeline';
 import { getConnection, platformOAuthConfigured } from '@/services/youtubeConnection';
 import { emailConfigured } from '@/lib/email';
 import { billingConfigured } from '@/services/billing';
-import { blobAccess } from '@/lib/storage';
+import { blobAccess, storageConfigured } from '@/lib/storage';
+import { workerConfigured } from '@/lib/jobs';
 
 export async function GET() {
   try {
@@ -85,6 +86,9 @@ export async function GET() {
           billing: billingConfigured(),
           email: emailConfigured(),
           storageAccess: blobAccess(),
+          // Uploads need Blob storage + the media worker; exporting video needs the worker.
+          uploads: storageConfigured() && workerConfigured(),
+          videoExport: workerConfigured(),
         },
         settings: {
           brandName: settings?.brandName || '',

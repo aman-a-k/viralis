@@ -5,6 +5,8 @@ import { hasDb, resetDb, makeUser, session, json, params } from './helpers';
 
 // The AI model: returns clips anchored inside whatever transcript window it's shown.
 const llmCalls: string[] = [];
+// Lets a test run code while an AI call is "in flight".
+const llmHook: { during?: () => Promise<void> } = {};
 vi.mock('@/lib/llm', async (orig) => {
   const actual = await orig<typeof import('@/lib/llm')>();
   return {
@@ -18,6 +20,9 @@ vi.mock('@/lib/llm', async (orig) => {
             create: vi.fn(async ({ messages }: { messages: { content: string }[] }) => {
               const prompt = messages[messages.length - 1].content;
               llmCalls.push(prompt);
+              const during = llmHook.during;
+              llmHook.during = undefined;
+              if (during) await during();
               const range = prompt.match(/EXCERPT \((\d+):(\d+)–/);
               const start = range ? Number(range[1]) * 60 + Number(range[2]) : 0;
               const clips = [
@@ -196,5 +201,29 @@ describe.skipIf(!hasDb)('customer journey: upload → clips → review → expor
     // Clips come from across the recording, not only its beginning.
     const starts = done.clips.map((c) => c.startTime).sort((a, b) => a - b);
     expect(starts[starts.length - 1]).toBeGreaterThan(done.duration! / 2);
+  });
+
+  it('saves clips once when a slow AI call outlives its lease and another run takes the job over', async () => {
+    const { runAnalysisSlice } = await import('@/services/pipeline');
+    const { enqueueJob } = await import('@/lib/jobs');
+    const segments = Array.from({ length: 20 }, (_, i) => ({ text: `Point number ${i} explained clearly.`, start: i * 5, end: i * 5 + 5 }));
+    const project = await prisma.project.create({
+      data: { workspaceId: ws, title: 'Race', sourceType: 'transcript', transcriptJson: JSON.stringify(segments), duration: 100, status: 'analyzing', rightsConfirmed: true },
+    });
+    const job = await enqueueJob({ workspaceId: ws, type: 'analyze', projectId: project.id, payload: { desiredClipCount: 3, config: {} } });
+
+    // While the first run waits on the AI, its lease lapses and a second run
+    // claims the job and finishes it.
+    llmHook.during = async () => {
+      await prisma.job.update({ where: { id: job.id }, data: { leaseUntil: new Date(Date.now() - 1000) } });
+      await runAnalysisSlice({ jobId: job.id });
+    };
+    await runAnalysisSlice({ jobId: job.id });
+
+    const done = await prisma.project.findUniqueOrThrow({ where: { id: project.id }, include: { clips: true } });
+    expect(done.status).toBe('ready');
+    expect(llmCalls.length).toBe(2);
+    expect(done.clips.length).toBe(1);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('succeeded');
   });
 });

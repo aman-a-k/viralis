@@ -8,6 +8,7 @@ import {
 import type { ClipData, ProjectData } from '@/types';
 import { humanizeHook } from '@/lib/hookLabels';
 import { api, errorMessage, fmtTime } from '@/lib/client';
+import { ScoreRing } from './motion';
 
 const PLATFORMS = ['youtube', 'instagram', 'tiktok', 'linkedin', 'twitter'] as const;
 const PLATFORM_LABEL: Record<string, string> = { instagram: 'Instagram', youtube: 'YouTube', linkedin: 'LinkedIn', twitter: 'X', tiktok: 'TikTok' };
@@ -18,6 +19,8 @@ interface Props {
   project: ProjectData;
   index: number;
   channelConnected: boolean;
+  /** False when the media worker isn't configured on this deployment. */
+  canRender?: boolean;
   onChange: (clip: ClipData) => void;
   onEdit: () => void;
   onGoToSettings: () => void;
@@ -31,7 +34,7 @@ const STATUS_BADGE: Record<string, [string, string]> = {
   rejected: ['badge-danger', 'Rejected'],
 };
 
-export function ClipCard({ clip, project, index, channelConnected, onChange, onEdit, onGoToSettings }: Props) {
+export function ClipCard({ clip, project, index, channelConnected, canRender = true, onChange, onEdit, onGoToSettings }: Props) {
   const [platform, setPlatform] = useState<string>(PLATFORMS.find((p) => clip.captionVersions[p]) || 'youtube');
   const [aspect, setAspect] = useState(clip.renderedAspect || '9:16');
   const [privacy, setPrivacy] = useState<'unlisted' | 'private' | 'public'>('unlisted');
@@ -39,7 +42,7 @@ export function ClipCard({ clip, project, index, channelConnected, onChange, onE
   const [showSource, setShowSource] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const canExport = project.sourceType !== 'transcript';
+  const canExport = project.sourceType !== 'transcript' && canRender;
   const working = clip.renderStatus === 'queued' || clip.renderStatus === 'rendering';
   const [badgeClass, badgeLabel] = STATUS_BADGE[clip.status] || STATUS_BADGE.candidate;
 
@@ -89,10 +92,11 @@ export function ClipCard({ clip, project, index, channelConnected, onChange, onE
   };
 
   const published = clip.publish?.status === 'published' && clip.publish.postUrl;
+  const textOnly = project.sourceType === 'transcript' && !clip.hasRender;
 
   return (
-    <article className="panel-card clip-card" aria-labelledby={`clip-${clip.id}-title`}>
-      <div className="clip-card-media">
+    <article className={`panel-card clip-card spot ${textOnly ? 'text-only' : ''}`} aria-labelledby={`clip-${clip.id}-title`} style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}>
+      {!textOnly && <div className="clip-card-media">
         {clip.hasRender && clip.renderStatus !== 'expired' ? (
           <video src={`/api/media/clip/${clip.id}`} controls preload="none" className="clip-video" aria-label={`Exported video: ${clip.title}`} />
         ) : showSource && project.sourceType === 'youtube' && project.sourceVideoId ? (
@@ -116,7 +120,7 @@ export function ClipCard({ clip, project, index, channelConnected, onChange, onE
             )}
           </button>
         )}
-      </div>
+      </div>}
 
       <div className="clip-card-body">
         <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -129,8 +133,14 @@ export function ClipCard({ clip, project, index, channelConnected, onChange, onE
           {clip.renderStatus === 'stale' && <span className="badge badge-warning">Edits not exported yet</span>}
           {clip.renderStatus === 'expired' && <span className="badge badge-neutral">Export deleted (retention)</span>}
         </div>
-        <h3 id={`clip-${clip.id}-title`} style={{ fontSize: '0.95rem', fontWeight: 650, lineHeight: 1.35 }}>{clip.title}</h3>
-        {clip.reasoning && <p className="text-muted" style={{ fontSize: '0.8rem' }}>{clip.reasoning}</p>}
+        <div className="clip-head">
+          <ScoreRing value={clip.viralityScore} />
+          <div style={{ minWidth: 0 }}>
+            <h3 id={`clip-${clip.id}-title`} style={{ fontSize: '0.95rem', fontWeight: 650, lineHeight: 1.35 }}>{clip.title}</h3>
+            {clip.reasoning && <p className="text-muted" style={{ fontSize: '0.8rem', marginTop: '0.2rem' }}>{clip.reasoning}</p>}
+          </div>
+        </div>
+        {textOnly && <p className="text-subtle" style={{ fontSize: '0.72rem' }}>From a pasted transcript — cut this moment from your own video using the timestamps, and download its captions.</p>}
 
         <details>
           <summary className="text-subtle" style={{ fontSize: '0.75rem', cursor: 'pointer' }}>What’s said in this clip</summary>

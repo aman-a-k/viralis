@@ -104,3 +104,9 @@ export const LANGUAGES: [string, string][] = [
   ['ar', 'Arabic'],
   ['id', 'Indonesian'],
 ];
+
+/** "1 clip" / "4 clips", not counting dismissed ones. */
+export function clipCountLabel(clips: { status: string }[]): string {
+  const n = clips.filter((c) => c.status !== 'rejected').length;
+  return `${n} clip${n === 1 ? '' : 's'}`;
+}

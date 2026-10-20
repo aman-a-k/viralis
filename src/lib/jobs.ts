@@ -85,10 +85,10 @@ export async function claimJob(
       "status" = 'running',
       "attempts" = "attempts" + 1,
       "lockedBy" = ${workerId},
-      "leaseUntil" = NOW() + make_interval(secs => ${LEASE_SECONDS}),
-      "startedAt" = COALESCE("startedAt", NOW()),
+      "leaseUntil" = (NOW() AT TIME ZONE 'UTC') + make_interval(secs => ${LEASE_SECONDS}),
+      "startedAt" = COALESCE("startedAt", (NOW() AT TIME ZONE 'UTC')),
       "progress" = 'Starting',
-      "updatedAt" = NOW()
+      "updatedAt" = (NOW() AT TIME ZONE 'UTC')
     WHERE "id" = (
       SELECT "id" FROM "Job"
       WHERE "type" = ANY(${types}::text[])
@@ -96,8 +96,8 @@ export async function claimJob(
         AND (${projectId}::text IS NULL OR "projectId" = ${projectId})
         AND "attempts" < "maxAttempts"
         AND (
-          ("status" = 'queued' AND "runAfter" <= NOW())
-          OR ("status" = 'running' AND "leaseUntil" < NOW())
+          ("status" = 'queued' AND "runAfter" <= (NOW() AT TIME ZONE 'UTC'))
+          OR ("status" = 'running' AND "leaseUntil" < (NOW() AT TIME ZONE 'UTC'))
         )
       ORDER BY "createdAt" ASC
       LIMIT 1
@@ -111,9 +111,9 @@ export async function claimJob(
 export async function heartbeatJob(jobId: string, workerId: string, progress?: string): Promise<boolean> {
   const res = await prisma.$executeRaw`
     UPDATE "Job" SET
-      "leaseUntil" = NOW() + make_interval(secs => ${LEASE_SECONDS}),
+      "leaseUntil" = (NOW() AT TIME ZONE 'UTC') + make_interval(secs => ${LEASE_SECONDS}),
       "progress" = COALESCE(${progress ?? null}, "progress"),
-      "updatedAt" = NOW()
+      "updatedAt" = (NOW() AT TIME ZONE 'UTC')
     WHERE "id" = ${jobId} AND "lockedBy" = ${workerId} AND "status" = 'running'`;
   return res > 0;
 }
@@ -191,7 +191,7 @@ export async function failJob(
 export async function findAbandonedJobs(): Promise<Job[]> {
   return prisma.$queryRaw<Job[]>`
     SELECT * FROM "Job"
-    WHERE "status" = 'running' AND "leaseUntil" < NOW() AND "attempts" >= "maxAttempts"`;
+    WHERE "status" = 'running' AND "leaseUntil" < (NOW() AT TIME ZONE 'UTC') AND "attempts" >= "maxAttempts"`;
 }
 
 export async function cancelJobs(where: { projectId?: string; clipId?: string; workspaceId: string }) {

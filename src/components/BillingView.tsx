@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Check, CreditCard, RefreshCw } from 'lucide-react';
+import { Check, CreditCard, RefreshCw, ShieldCheck, Receipt } from 'lucide-react';
+import { CountUp, Reveal } from './motion';
 import { api, errorMessage, fmtDate } from '@/lib/client';
 
 interface Plan {
@@ -52,17 +53,23 @@ function loadCheckoutScript(): Promise<void> {
 
 const inr = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN')}`;
 
-function Meter({ label, used, limit, unit }: { label: string; used: number; limit: number; unit: string }) {
-  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
+function UsageRing({ label, used, limit, unit }: { label: string; used: number; limit: number; unit: string }) {
+  const r = 46;
+  const c = 2 * Math.PI * r;
+  const pct = limit > 0 ? Math.min(1, used / limit) : 1;
+  const left = Math.max(0, limit - used);
+  const color = pct >= 0.9 ? 'var(--amber)' : 'var(--accent)';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-        <span>{label}</span>
-        <span className="tnum text-muted">{used} / {limit} {unit}</span>
+    <div className="usage-big" role="meter" aria-label={label} aria-valuenow={used} aria-valuemin={0} aria-valuemax={limit}>
+      <div className="ring">
+        <svg width="108" height="108" viewBox="0 0 108 108" aria-hidden="true">
+          <circle cx="54" cy="54" r={r} fill="none" stroke="var(--surface-3)" strokeWidth="8" />
+          <circle className="arc" cx="54" cy="54" r={r} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} />
+        </svg>
+        <div className="val"><b className="tnum"><CountUp value={left} /></b><span>{unit} left</span></div>
       </div>
-      <div className={`progress ${pct >= 90 ? 'progress-warn' : ''}`} role="progressbar" aria-label={label} aria-valuenow={used} aria-valuemin={0} aria-valuemax={limit}>
-        <div style={{ width: `${pct}%` }} />
-      </div>
+      <span>{label}</span>
+      <span className="text-subtle tnum" style={{ fontSize: '0.7rem', fontWeight: 500 }}>{used} of {limit} used</span>
     </div>
   );
 }
@@ -151,83 +158,90 @@ export function BillingView({ onChanged }: { onChanged: () => void }) {
     }
   };
 
-  if (!data) return <div className="panel empty-state"><RefreshCw className="animate-spin" size={20} aria-label="Loading" /></div>;
+  if (!data) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }} role="status" aria-label="Loading billing">
+        <div className="skeleton" style={{ height: 190, borderRadius: 18 }} />
+        <div className="grid-cols-2">{[0, 1].map((i) => <div key={i} className="skeleton" style={{ height: 320, borderRadius: 18 }} />)}</div>
+      </div>
+    );
+  }
   const { entitlement: e, subscription: sub } = data;
   const activeSub = sub && ['active', 'pending'].includes(sub.status);
+  const heading = e.source === 'unlimited' ? 'Internal account' : e.source === 'subscription' ? `${e.planName} plan` : e.source === 'trial' ? 'Free trial' : 'No active plan';
+  const status = e.source === 'subscription' && e.periodEnd
+    ? sub?.cancelAtPeriodEnd ? `Ends ${fmtDate(e.periodEnd)} — won’t renew` : `Renews ${fmtDate(e.periodEnd)}`
+    : e.source === 'trial' ? 'One-time allowance' : e.source === 'unlimited' ? 'Unmetered' : 'Choose a plan below to keep processing';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <section className="panel-card" aria-labelledby="usage-h" style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
-          <h2 id="usage-h" className="section-title">
-            {e.source === 'unlimited' ? 'Internal account (unmetered)' : e.source === 'subscription' ? `${e.planName} plan` : e.source === 'trial' ? 'Free trial' : 'No active plan'}
-          </h2>
-          <span className="text-subtle" style={{ fontSize: '0.78rem' }}>
-            {e.source === 'subscription' && e.periodEnd
-              ? sub?.cancelAtPeriodEnd
-                ? `Ends ${fmtDate(e.periodEnd)} — won’t renew`
-                : `Renews ${fmtDate(e.periodEnd)}`
-              : e.source === 'trial'
-                ? 'One-time allowance'
-                : ''}
-          </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <section className="plan-hero" aria-labelledby="usage-h">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', minWidth: 0 }}>
+          <span className="eyebrow">Current plan</span>
+          <h2 id="usage-h">{heading}</h2>
+          <span className={`badge badge-dot ${e.source === 'none' ? 'badge-warning' : sub?.cancelAtPeriodEnd ? 'badge-neutral' : 'badge-success'}`} style={{ alignSelf: 'flex-start' }}>{status}</span>
+          <p className="text-subtle" style={{ fontSize: '0.75rem', maxWidth: 440 }}>
+            Processing time counts the length of each recording you add. Each video export (including re-exports after edits) counts once. Anything that fails on our side is returned automatically.
+          </p>
+          {activeSub && !sub!.cancelAtPeriodEnd && data.canManage && (
+            <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start', marginLeft: '-0.6rem' }} disabled={busy === 'cancel'} onClick={cancel}>Cancel subscription</button>
+          )}
         </div>
         {e.source !== 'unlimited' && (
-          <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' }}>
-            <Meter label="Processing time" used={e.used.sourceMinutes} limit={e.limits.sourceMinutes} unit="min" />
-            <Meter label="Video exports" used={e.used.exports} limit={e.limits.exports} unit="" />
+          <div className="usage-rings">
+            <UsageRing label="Processing time" used={e.used.sourceMinutes} limit={e.limits.sourceMinutes} unit="min" />
+            <UsageRing label="Video exports" used={e.used.exports} limit={e.limits.exports} unit="exports" />
           </div>
-        )}
-        <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
-          Processing time counts the length of each recording you add. Each video export (including re-exports after edits) counts once. Anything that fails on our side is returned automatically.
-        </p>
-        {sub?.status === 'pending' && (
-          <p className="notice notice-warning">Your last renewal payment failed and is being retried. Update your payment method from the link in Razorpay’s email to avoid losing access.</p>
-        )}
-        {sub?.status === 'halted' && (
-          <p className="notice notice-error">Renewal payments failed, so the subscription is paused. Subscribe again to restore your plan.</p>
-        )}
-        {activeSub && !sub!.cancelAtPeriodEnd && data.canManage && (
-          <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} disabled={busy === 'cancel'} onClick={cancel}>Cancel subscription</button>
         )}
       </section>
 
-      <section aria-labelledby="plans-h" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <h2 id="plans-h" className="section-title">Plans</h2>
+      {sub?.status === 'pending' && (
+        <p className="notice notice-warning">Your last renewal payment failed and is being retried. Update your payment method from the link in Razorpay’s email to avoid losing access.</p>
+      )}
+      {sub?.status === 'halted' && (
+        <p className="notice notice-error">Renewal payments failed, so the subscription is paused. Subscribe again to restore your plan.</p>
+      )}
+
+      <section aria-labelledby="plans-h" style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+        <div className="section-head">
+          <span className="section-icon"><Receipt /></span>
+          <div>
+            <h2 id="plans-h" className="section-title">Plans</h2>
+            <p>Billed monthly in rupees, plus applicable taxes. Cancel anytime.</p>
+          </div>
+        </div>
         {!data.billingAvailable && (
           <p className="notice notice-warning">Online payments aren’t switched on yet. Contact us to start a paid plan.</p>
         )}
-        <div className="plan-grid">
-          {data.plans.map((p) => {
+        <div className="price-grid" style={{ margin: 0, maxWidth: 'none', width: '100%' }}>
+          {data.plans.map((p, i) => {
             const current = (e.source === 'subscription' && e.planId === p.id) || (p.id === 'trial' && e.source === 'trial');
             return (
-              <div key={p.id} className={`panel-card plan-card ${current ? 'current' : ''}`}>
+              <Reveal key={p.id} delay={i * 80} className={`price-card spot ${current ? 'current' : p.id === 'creator' ? 'featured' : ''}`}>
+                {current ? <span className="tag green">Current plan</span> : p.id === 'creator' ? <span className="tag">Most popular</span> : null}
                 <span className="eyebrow">{p.name}</span>
-                <p className="plan-price">{p.pricePaise ? inr(p.pricePaise) : 'Free'}<span className="text-subtle">{p.interval === 'month' ? ' / month' : ' · once'}</span></p>
-                <p className="text-muted" style={{ fontSize: '0.8rem' }}>{p.blurb}</p>
-                <ul className="plan-features">
-                  <li><Check size={13} /> {p.sourceMinutes} minutes of recordings{p.interval === 'month' ? ' a month' : ''}</li>
-                  <li><Check size={13} /> {p.exports} video exports{p.interval === 'month' ? ' a month' : ''}</li>
-                  <li><Check size={13} /> Recordings up to {p.maxSourceMinutes} min · {p.maxUploadMb >= 1000 ? `${p.maxUploadMb / 1000} GB` : `${p.maxUploadMb} MB`}</li>
-                  <li><Check size={13} /> Files kept {p.retentionDays} days</li>
-                  <li><Check size={13} /> Edit, download, publish to YouTube</li>
+                <p className="amount">{p.pricePaise ? inr(p.pricePaise) : '₹0'}<small>{p.interval === 'month' ? ' / month' : ' · one-time'}</small></p>
+                <p className="text-muted" style={{ fontSize: '0.84rem' }}>{p.blurb}</p>
+                <ul>
+                  <li><Check size={14} /> {p.sourceMinutes} minutes of recordings{p.interval === 'month' ? ' a month' : ''}</li>
+                  <li><Check size={14} /> {p.exports} video exports{p.interval === 'month' ? ' a month' : ''}</li>
+                  <li><Check size={14} /> Recordings up to {p.maxSourceMinutes} min · {p.maxUploadMb >= 1000 ? `${p.maxUploadMb / 1000} GB` : `${p.maxUploadMb} MB`}</li>
+                  <li><Check size={14} /> Files kept {p.retentionDays} days</li>
+                  <li><Check size={14} /> Edit, download, publish to YouTube</li>
                 </ul>
-                {p.id !== 'trial' && (
-                  current ? (
-                    <span className="badge badge-success" style={{ alignSelf: 'flex-start' }}>Current plan</span>
-                  ) : (
-                    <button type="button" className="btn btn-primary" disabled={!data.billingAvailable || !data.canManage || !!busy || !!activeSub && !sub!.cancelAtPeriodEnd} onClick={() => subscribe(p.id)}>
-                      {busy === p.id ? <RefreshCw size={14} className="animate-spin" /> : <CreditCard size={14} />} Subscribe
-                    </button>
-                  )
+                {p.id !== 'trial' && !current && (
+                  <button type="button" className="btn btn-primary btn-lg" disabled={!data.billingAvailable || !data.canManage || !!busy || !!activeSub && !sub!.cancelAtPeriodEnd} onClick={() => subscribe(p.id)}>
+                    {busy === p.id ? <RefreshCw size={14} className="animate-spin" /> : <CreditCard size={14} />} Subscribe
+                  </button>
                 )}
-              </div>
+              </Reveal>
             );
           })}
         </div>
         {!data.canManage && <p className="text-subtle" style={{ fontSize: '0.75rem' }}>Only the workspace owner can change the plan.</p>}
-        <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
-          Payments are processed by Razorpay (UPI, cards, netbanking). Prices exclude applicable taxes. Cancel anytime; see our <a className="link" href="/refunds">refund policy</a>.
+        <p className="text-subtle" style={{ fontSize: '0.75rem', display: 'flex', gap: '0.4rem', alignItems: 'flex-start' }}>
+          <ShieldCheck size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>Payments are processed securely by Razorpay (UPI, cards, netbanking). Prices exclude applicable taxes. See our <a className="link" href="/refunds">refund policy</a>.</span>
         </p>
       </section>
     </div>

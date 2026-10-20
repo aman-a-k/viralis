@@ -23,6 +23,14 @@ export function errorResponse(err: unknown, fallback = 'Something went wrong. Tr
     return NextResponse.json({ success: false, error: err.message, code: err.code }, { status: err.status });
   }
   console.error(`[${tag}]`, err);
+  // fetch() to an outside service failed before any response (DNS, timeout,
+  // connection reset): say so, rather than a vague "something went wrong".
+  if (err instanceof TypeError && err.message === 'fetch failed') {
+    return NextResponse.json(
+      { success: false, error: 'Couldn’t reach an outside service (YouTube/Google) just now. Check the connection and try again in a moment.', code: 'upstream_unreachable' },
+      { status: 503 }
+    );
+  }
   return NextResponse.json({ success: false, error: fallback }, { status: 500 });
 }
 
