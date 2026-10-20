@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Check, Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
 
 interface Props {
@@ -97,21 +98,29 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1.5rem",
-        background: "var(--background)",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: "400px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1.75rem", justifyContent: "center" }}>
+    <div className="auth-wrap">
+      <aside className="auth-art" aria-hidden="true">
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <BrandMark size={30} />
+          <span style={{ fontSize: "1.15rem", fontWeight: 800, letterSpacing: "-0.03em" }}>Viralis</span>
+        </Link>
+        <div className="lp-grid-bg" />
+        <div style={{ position: "relative" }}>
+          <blockquote>One recording in. <em>A week of captioned clips</em> out.</blockquote>
+          <ul className="plan-features" style={{ marginTop: "1.5rem", fontSize: "0.88rem", gap: "0.6rem" }}>
+            <li><Check size={14} /> Finds the strongest standalone moments</li>
+            <li><Check size={14} /> Captions timed to every word, in 8+ Indian languages</li>
+            <li><Check size={14} /> Nothing is published without your approval</li>
+          </ul>
+        </div>
+        <p className="text-subtle" style={{ fontSize: "0.78rem", position: "relative" }}>Made in Mangaluru · Free trial, no card needed</p>
+      </aside>
+      <div className="auth-form">
+      <div className="auth-card">
+        <Link href="/" className="auth-mobile-brand" style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1.75rem", justifyContent: "center" }}>
           <BrandMark size={34} />
           <span style={{ fontSize: "1.3rem", fontWeight: 700, letterSpacing: "-0.03em" }}>Viralis</span>
-        </div>
+        </Link>
 
         <div className="panel-card" style={{ padding: "1.75rem" }}>
           <h1 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "0.35rem" }}>
@@ -214,6 +223,7 @@ export function SignInForm({ devLoginAvailable, googleLoginAvailable, signupOpen
           </p>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { CheckCircle, XCircle, Inbox, Lightbulb, RefreshCw, Clock } from 'lucide-react';
+import { CheckCircle, XCircle, Inbox, Lightbulb, RefreshCw, Clock, CheckCheck, Keyboard } from 'lucide-react';
 import type { ApprovalItem, DashboardData } from '@/types';
 import { api, errorMessage, fmtTime } from '@/lib/client';
 
@@ -25,6 +25,10 @@ export function ReviewView({ data, onRefresh }: Props) {
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [writing, setWriting] = useState(false);
+  const [focus, setFocus] = useState(0);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const [bulk, setBulk] = useState(false);
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const clipsById = useMemo(() => {
     const map = new Map<string, { clip: DashboardData['projects'][number]['clips'][number]; project: DashboardData['projects'][number] }>();
@@ -42,13 +46,57 @@ export function ReviewView({ data, onRefresh }: Props) {
       toast.success(res.message, { duration: 6000 });
       setRejecting(null);
       setReason('');
-      onRefresh();
+      setLeaving(item.id);
+      setTimeout(() => { setLeaving(null); onRefresh(); }, 320);
     } catch (err) {
       toast.error(errorMessage(err), { duration: 8000 });
     } finally {
       setBusy('');
     }
   };
+
+  const approveAll = async () => {
+    if (!clipItems.length || bulk) return;
+    if (!window.confirm(`Approve all ${clipItems.length} clip${clipItems.length === 1 ? '' : 's'} in the queue? Clips without a video will start exporting.`)) return;
+    setBulk(true);
+    let ok = 0;
+    for (const item of clipItems) {
+      try {
+        await api('/api/approval', { body: { id: item.id, action: 'approve' } });
+        ok++;
+      } catch (err) {
+        toast.error(`“${item.topic}”: ${errorMessage(err)}`, { duration: 8000 });
+      }
+    }
+    setBulk(false);
+    if (ok) toast.success(`Approved ${ok} clip${ok === 1 ? '' : 's'}.`);
+    onRefresh();
+  };
+
+  // Keyboard triage: J/K to move, A to approve, X to reject.
+  const current = clipItems[Math.min(focus, Math.max(0, clipItems.length - 1))];
+  useEffect(() => {
+    if (tab !== 'clips') return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || document.querySelector('.cmdk-backdrop')) return;
+      if (!clipItems.length) return;
+      if (e.key === 'j' || e.key === 'k') {
+        e.preventDefault();
+        const next = Math.max(0, Math.min(clipItems.length - 1, focus + (e.key === 'j' ? 1 : -1)));
+        setFocus(next);
+        cardRefs.current[clipItems[next].id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else if (e.key === 'a' && current && !busy) {
+        e.preventDefault();
+        decide(current, 'approve');
+      } else if (e.key === 'x' && current) {
+        e.preventDefault();
+        setRejecting(current.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   const writeIdea = async () => {
     setWriting(true);
@@ -91,6 +139,17 @@ export function ReviewView({ data, onRefresh }: Props) {
         </button>
       </div>
 
+      {tab === 'clips' && clipItems.length > 0 && (
+        <div className="review-toolbar">
+          <p className="text-subtle" style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Keyboard size={13} /> <kbd className="kbd">J</kbd><kbd className="kbd">K</kbd> move · <kbd className="kbd">A</kbd> approve · <kbd className="kbd">X</kbd> reject
+          </p>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={approveAll} disabled={bulk}>
+            {bulk ? <RefreshCw size={13} className="animate-spin" /> : <CheckCheck size={13} />} Approve all ({clipItems.length})
+          </button>
+        </div>
+      )}
+
       {tab === 'clips' && (
         clipItems.length === 0 ? (
           <section className="panel empty-state">
@@ -101,12 +160,13 @@ export function ReviewView({ data, onRefresh }: Props) {
             </p>
           </section>
         ) : (
-          clipItems.map((item) => {
+          clipItems.map((item, idx) => {
             const found = item.clipId ? clipsById.get(item.clipId) : undefined;
             const clip = found?.clip;
             const project = found?.project;
             return (
-              <article key={item.id} className="panel-card review-card">
+              <article key={item.id} ref={(el) => { cardRefs.current[item.id] = el; }} onClick={() => setFocus(idx)}
+                className={`panel-card review-card spot ${current?.id === item.id && clipItems.length > 1 ? 'focused' : ''} ${leaving === item.id ? 'review-exit' : ''}`}>
                 <div className="review-media">
                   {clip?.hasRender ? (
                     <video src={`/api/media/clip/${clip.id}`} controls preload="none" className="clip-video" />
@@ -135,7 +195,7 @@ export function ReviewView({ data, onRefresh }: Props) {
                       <p className="quote-box" style={{ whiteSpace: 'pre-wrap' }}>{item.seoDescription}</p>
                     </details>
                   )}
-                  {actions(item, clip?.hasRender ? 'Approve' : 'Approve & export')}
+                  {actions(item, clip?.hasRender || project?.sourceType === 'transcript' ? 'Approve' : 'Approve & export')}
                 </div>
               </article>
             );

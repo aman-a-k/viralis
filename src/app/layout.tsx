@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import "./globals.css";
+import "./experience.css";
 import { Providers } from "@/components/Providers";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
@@ -20,7 +21,7 @@ export default function RootLayout({
     <html lang="en" className={manrope.variable}>
       <body className={`dark-theme`}>
         <Providers>
-          <Toaster position="bottom-right" />
+          <Toaster position="bottom-right" toastOptions={{ className: "vr-toast", success: { iconTheme: { primary: "#3fb950", secondary: "#111" } }, error: { iconTheme: { primary: "#f85149", secondary: "#111" } } }} />
           {children}
         </Providers>
       </body>

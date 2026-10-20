@@ -3,14 +3,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
-  Upload, Link2, FileText, Radar, Rocket, RefreshCw, Sparkles, Film, AlertTriangle, Trash2, Flame, Coffee, TrendingUp, BookOpen, Eye, Video, ChevronDown,
+  Upload, Link2, FileText, Radar, Rocket, RefreshCw, Sparkles, Film, AlertTriangle, Trash2, Flame, Coffee, TrendingUp, BookOpen, Eye, Video, ChevronDown, Search, X,
 } from 'lucide-react';
 import type { ClipData, DashboardData, ProjectData } from '@/types';
 import { api, errorMessage, fmtTime, fmtViews, fmtDate, readMediaDuration, LANGUAGES } from '@/lib/client';
 import { ClipCard } from './ClipCard';
 import { ClipEditor } from './ClipEditor';
 
-type Mode = 'upload' | 'link' | 'transcript' | 'browse' | 'automatic';
+export type StudioMode = 'upload' | 'link' | 'transcript' | 'browse' | 'automatic';
+type Mode = StudioMode;
 type Vibe = 'hook' | 'calm' | 'trendy' | 'story';
 
 const VIBE_LABEL: Record<Vibe, string> = { hook: 'Hook-heavy', calm: 'Calm & informative', trendy: 'Trendy & fast', story: 'Story-driven' };
@@ -42,14 +43,16 @@ interface Props {
   onRefresh: () => void;
   onGoToSettings: () => void;
   onGoToBilling: () => void;
+  initialMode?: StudioMode;
+  initialProjectId?: string;
 }
 
-export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: Props) {
+export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling, initialMode, initialProjectId }: Props) {
   const { plan, settings } = data;
   const remainingMin = Math.max(0, plan.limits.sourceMinutes - plan.used.sourceMinutes);
   const noPlan = plan.source === 'none';
 
-  const [mode, setMode] = useState<Mode>('upload');
+  const [mode, setMode] = useState<Mode>(initialMode || (data.capabilities.uploads ? 'upload' : 'link'));
   const [busy, setBusy] = useState(false);
   const [rights, setRights] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
@@ -87,7 +90,10 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
     const o = overrides[p.id];
     return o && new Date(o.updatedAt) >= new Date(p.updatedAt) ? o : p;
   }), [data.projects, overrides]);
-  const [selectedId, setSelectedId] = useState<string>('');
+  const [selectedId, setSelectedId] = useState<string>(initialProjectId || '');
+  const [projectQuery, setProjectQuery] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const selected = projects.find((p) => p.id === selectedId) || projects[0];
   const [editing, setEditing] = useState<string | null>(null);
   const closeEditor = useCallback(() => setEditing(null), []);
@@ -234,6 +240,29 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
   }, [region, category, trendingNext]);
 
 
+  // Opened straight into "Browse trending" (from the command menu): load the chart.
+  useEffect(() => {
+    if (initialMode !== 'browse') return;
+    const t = setTimeout(() => findTrending(false), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const renameProject = async () => {
+    if (!selected || titleDraft === null) return;
+    const next = titleDraft.trim();
+    setTitleDraft(null);
+    if (!next || next === selected.title) return;
+    try {
+      const res = await api<{ project: ProjectData }>(`/api/projects/${selected.id}`, { method: 'PATCH', body: { title: next } });
+      setProject(res.project);
+      onRefresh();
+      toast.success('Renamed.');
+    } catch (err) {
+      handleError(err);
+    }
+  };
+
   // ── Following progress ────────────────────────────────────────────────
   const watching = useMemo(
     () => projects.filter((p) => PROCESSING.has(p.status) || p.clips.some((c) => c.renderStatus === 'queued' || c.renderStatus === 'rendering')).map((p) => p.id),
@@ -302,6 +331,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
   };
 
   const visibleTrending = vibe === 'all' ? trending : trending.filter((v) => v.vibe === vibe);
+  const listed = projectQuery.trim() ? projects.filter((p) => p.title.toLowerCase().includes(projectQuery.trim().toLowerCase())) : projects;
   const clips = (selected?.clips || []).filter((c) => clipFilter === 'all' || c.status !== 'rejected');
   const rejectedCount = (selected?.clips || []).filter((c) => c.status === 'rejected').length;
 
@@ -345,24 +375,41 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
           ))}
         </div>
 
-        {mode === 'upload' && (
+        {mode === 'upload' && !data.capabilities.uploads && (
+          <div className="notice">
+            <AlertTriangle size={15} />
+            <span>File uploads aren’t switched on for this workspace yet. You can still <button type="button" className="link-button" onClick={() => setMode('link')}>use a YouTube link</button> or <button type="button" className="link-button" onClick={() => setMode('transcript')}>paste a transcript</button>.</span>
+          </div>
+        )}
+
+        {mode === 'upload' && data.capabilities.uploads && (
           <form onSubmit={startUpload} style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
             <p className="text-subtle" style={{ fontSize: '0.78rem' }}>
-              A lesson, webinar, interview or talk you recorded. MP4, MOV, WebM or audio · up to {plan.maxUploadMb} MB and {plan.maxSourceMinutes} minutes on your plan. Files stay private to your workspace.
+              A lesson, webinar, interview or talk you recorded. Files stay private to your workspace.
             </p>
-            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <label className="btn btn-secondary file-picker">
-                <Film size={14} />
-                <span className="truncate" style={{ maxWidth: 240 }}>{file ? file.name : 'Choose a file…'}</span>
-                <input type="file" accept="video/*,audio/*" disabled={busy} className="sr-only" onChange={(e) => chooseFile(e.target.files?.[0] || null)} />
-              </label>
-              {file && (
-                <span className="text-subtle tnum" style={{ fontSize: '0.75rem' }}>
-                  {(file.size / 1024 / 1024).toFixed(0)} MB{fileDuration ? ` · ${fmtTime(fileDuration)}` : ''}
-                  {fileDuration ? ` · uses ~${Math.ceil(fileDuration / 60)} min` : ''}
-                </span>
+            <label
+              className={`dropzone ${dragging ? 'drag' : ''} ${file ? 'has-file' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); if (!busy) setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => { e.preventDefault(); setDragging(false); if (!busy && e.dataTransfer.files?.[0]) chooseFile(e.dataTransfer.files[0]); }}
+            >
+              <span className="dz-icon">{file ? <Film size={20} /> : <Upload size={20} />}</span>
+              {file ? (
+                <>
+                  <span style={{ fontWeight: 650, fontSize: '0.88rem', maxWidth: '100%' }} className="truncate">{file.name}</span>
+                  <span className="text-subtle tnum" style={{ fontSize: '0.75rem' }}>
+                    {(file.size / 1024 / 1024).toFixed(0)} MB{fileDuration ? ` · ${fmtTime(fileDuration)}` : ''}
+                    {fileDuration ? ` · uses ~${Math.ceil(fileDuration / 60)} min` : ''} · <span className="link">Choose another</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontWeight: 650, fontSize: '0.88rem' }}>Drop your recording here, or <span style={{ color: 'var(--accent-hover)' }}>browse</span></span>
+                  <span className="text-subtle" style={{ fontSize: '0.75rem' }}>MP4, MOV, WebM or audio · up to {plan.maxUploadMb} MB · {plan.maxSourceMinutes} min</span>
+                </>
               )}
-            </div>
+              <input type="file" accept="video/*,audio/*" disabled={busy} className="sr-only" onChange={(e) => chooseFile(e.target.files?.[0] || null)} />
+            </label>
             <div className="form-group">
               <label className="form-label" htmlFor="up-title">Title</label>
               <input id="up-title" className="input-field" value={uploadTitle} maxLength={200} onChange={(e) => setUploadTitle(e.target.value)} placeholder="e.g. Week 3 — Thermodynamics basics" />
@@ -373,7 +420,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
                 <div style={{ width: `${progress}%` }} />
               </div>
             )}
-            <button type="submit" className="btn btn-primary" disabled={busy || !file || noPlan} style={{ alignSelf: 'flex-start' }}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !file || noPlan || !data.capabilities.uploads} style={{ alignSelf: 'flex-start' }}>
               {busy ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
               {progress !== null ? `Uploading ${progress}%` : 'Upload & find clips'}
             </button>
@@ -545,9 +592,17 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
       ) : (
         <div className="projects-layout">
           <nav className="panel-card project-list" aria-label="Projects">
-            <h2 className="eyebrow" style={{ marginBottom: '0.5rem' }}>Projects</h2>
+            <h2 className="eyebrow" style={{ marginBottom: '0.5rem' }}>Projects · {projects.length}</h2>
+            {projects.length > 4 && (
+              <div className="list-search">
+                <Search />
+                <input value={projectQuery} onChange={(e) => setProjectQuery(e.target.value)} placeholder="Filter projects" aria-label="Filter projects" />
+                {projectQuery && <button type="button" className="icon-btn" style={{ width: 20, height: 20 }} onClick={() => setProjectQuery('')} aria-label="Clear filter"><X size={12} /></button>}
+              </div>
+            )}
             <ul>
-              {projects.map((p) => (
+              {listed.length === 0 && <li className="text-subtle" style={{ fontSize: '0.75rem', padding: '0.5rem' }}>No match.</li>}
+              {listed.map((p) => (
                 <li key={p.id}>
                   <button type="button" className={`project-item ${selected?.id === p.id ? 'active' : ''}`} onClick={() => setSelectedId(p.id)} aria-current={selected?.id === p.id}>
                     <span className="truncate" style={{ fontWeight: 600, fontSize: '0.8rem' }}>{p.title}</span>
@@ -566,7 +621,17 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
             <section style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', minWidth: 0 }} aria-labelledby="project-title">
               <div className="panel-card" style={{ display: 'flex', gap: '0.9rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 200 }}>
-                  <h2 id="project-title" style={{ fontSize: '1rem', fontWeight: 650 }}>{selected.title}</h2>
+                  <h2 id="project-title" style={{ fontSize: '1rem', fontWeight: 650 }}>
+                    <input
+                      className="title-edit"
+                      aria-label="Project title (click to rename)"
+                      value={titleDraft ?? selected.title}
+                      maxLength={200}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onBlur={renameProject}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setTitleDraft(null); (e.target as HTMLInputElement).blur(); } }}
+                    />
+                  </h2>
                   <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
                     {selected.sourceType === 'youtube' ? 'YouTube' : selected.sourceType === 'transcript' ? 'Transcript' : 'Upload'}
                     {selected.duration ? ` · ${fmtTime(selected.duration)}` : ''}
@@ -582,15 +647,16 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
               </div>
 
               {PROCESSING.has(selected.status) && (
-                <div className="panel-card processing" role="status" aria-live="polite">
+                <div className="panel-card processing" role="status" aria-live="polite" style={{ borderColor: 'var(--accent-line)' }}>
                   <RefreshCw size={16} className="animate-spin" />
-                  <div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontWeight: 600, fontSize: '0.85rem' }}>{selected.stage || STATUS_TEXT[selected.status]}</p>
-                    <p className="text-subtle" style={{ fontSize: '0.75rem' }}>
+                    <p className="text-subtle" style={{ fontSize: '0.75rem', maxWidth: 560 }}>
                       {selected.status === 'transcribing'
                         ? 'Transcribing takes roughly a quarter of the recording’s length. You can close this page — progress is saved.'
                         : 'Reading the whole recording for standalone moments. Long recordings are processed in parts.'}
                     </p>
+                    <div className="pipeline-bar" aria-hidden="true" />
                     <ol className="stage-list" aria-label="Processing steps">
                       {['Upload', 'Transcribe', 'Find clips', 'Review'].map((s, i) => {
                         const at = selected.status === 'transcribing' || selected.status === 'queued' ? 1 : 2;
@@ -621,7 +687,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div key={selected.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 {clips.map((clip, i) => (
                   <ClipCard
                     key={clip.id}
@@ -629,6 +695,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling }: P
                     project={selected}
                     index={i}
                     channelConnected={data.channel.connected}
+                    canRender={data.capabilities.videoExport}
                     onChange={updateClip}
                     onEdit={() => setEditing(clip.id)}
                     onGoToSettings={onGoToSettings}
