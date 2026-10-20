@@ -9,7 +9,7 @@ import {
   Search, Link2, FileText, Keyboard, Check, Film, Lightbulb, FolderOpen, Sparkles,
 } from 'lucide-react';
 import type { DashboardData } from '@/types';
-import { api, ApiError, errorMessage } from '@/lib/client';
+import { api, ApiError, errorMessage, clipCountLabel } from '@/lib/client';
 import { StudioView, type StudioMode } from '@/components/StudioView';
 import { ReviewView } from '@/components/ReviewView';
 import { TrendHistoryView } from '@/components/TrendHistoryView';
@@ -187,7 +187,7 @@ export default function App() {
       ...nav.map(([t, label, icon, hint]) => ({ id: `go-${t}`, group: 'Go to', label, icon, hint, keywords: 'navigate page', run: () => setTab(t) })),
       ...data.projects.slice(0, 30).map((p) => ({
         id: `p-${p.id}`, group: 'Projects', label: p.title, icon: FolderOpen,
-        hint: p.status === 'ready' ? `${p.clips.filter((c) => c.status !== 'rejected').length} clips` : p.status,
+        hint: p.status === 'ready' ? clipCountLabel(p.clips) : p.status,
         keywords: 'open recording', run: () => openStudio({ projectId: p.id }),
       })),
       { id: 'shortcuts', group: 'Help', label: 'Keyboard shortcuts', icon: Keyboard, hint: '?', run: () => setShortcutsOpen(true) },
@@ -436,7 +436,7 @@ function HomeView({ data, name, go, openStudio }: {
                 <li key={p.id}>
                   <span className="truncate" style={{ fontWeight: 550 }}>{p.title}</span>
                   <span className={`badge ${p.status === 'ready' ? 'badge-success' : p.status === 'failed' ? 'badge-danger' : 'badge-warning'}`}>
-                    {p.status === 'ready' ? `${p.clips.filter((c) => c.status !== 'rejected').length} clips` : p.status === 'failed' ? 'Failed' : p.stage || 'Processing'}
+                    {p.status === 'ready' ? clipCountLabel(p.clips) : p.status === 'failed' ? 'Failed' : p.stage || 'Processing'}
                   </span>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => openStudio({ projectId: p.id })}>Open</button>
                 </li>

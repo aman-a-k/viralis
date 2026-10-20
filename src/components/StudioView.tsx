@@ -6,7 +6,7 @@ import {
   Upload, Link2, FileText, Radar, Rocket, RefreshCw, Sparkles, Film, AlertTriangle, Trash2, Flame, Coffee, TrendingUp, BookOpen, Eye, Video, ChevronDown, Search, X,
 } from 'lucide-react';
 import type { ClipData, DashboardData, ProjectData } from '@/types';
-import { api, errorMessage, fmtTime, fmtViews, fmtDate, readMediaDuration, LANGUAGES } from '@/lib/client';
+import { api, errorMessage, fmtTime, fmtViews, fmtDate, readMediaDuration, LANGUAGES, clipCountLabel } from '@/lib/client';
 import { ClipCard } from './ClipCard';
 import { ClipEditor } from './ClipEditor';
 
@@ -608,7 +608,7 @@ export function StudioView({ data, onRefresh, onGoToSettings, onGoToBilling, ini
                     <span className="truncate" style={{ fontWeight: 600, fontSize: '0.8rem' }}>{p.title}</span>
                     <span className="text-subtle" style={{ fontSize: '0.7rem', display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                       {PROCESSING.has(p.status) && <RefreshCw size={10} className="animate-spin" />}
-                      {p.status === 'failed' ? <span style={{ color: 'var(--red)' }}>Failed</span> : PROCESSING.has(p.status) ? (p.stage || STATUS_TEXT[p.status]) : `${p.clips.filter((c) => c.status !== 'rejected').length} clips`}
+                      {p.status === 'failed' ? <span style={{ color: 'var(--red)' }}>Failed</span> : PROCESSING.has(p.status) ? (p.stage || STATUS_TEXT[p.status]) : clipCountLabel(p.clips)}
                       {' · '}{fmtDate(p.createdAt)}
                     </span>
                   </button>
