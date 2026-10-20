@@ -7,6 +7,7 @@ import {
   enqueueJob,
   claimJob,
   finishJob,
+  heartbeatJob,
   failJob,
   yieldJob,
   parsePayload,
@@ -380,6 +381,9 @@ export async function runAnalysisSlice(opts: { jobId?: string; projectId?: strin
     let first = true;
     while (pending.length && (first || Date.now() < deadline)) {
       first = false;
+      // Keep the lease while a slow AI call runs; if another run took the
+      // job over meanwhile, stop — that run owns the result now.
+      if (!(await heartbeatJob(job.id, holder, `Analyzing ${progress.doneChunks.length}/${chunks.length} parts`))) return null;
       const batch = pending.slice(0, ANALYSIS_CONCURRENCY);
       const results = await Promise.all(batch.map((c) => analyzeChunk(meta, c, perChunk, options)));
       results.forEach((r, i) => {
@@ -407,6 +411,14 @@ export async function runAnalysisSlice(opts: { jobId?: string; projectId?: strin
     }
 
     const clips = await prisma.$transaction(async (tx) => {
+      // Complete the job and save its clips atomically, and only while this
+      // run still holds it — otherwise a run whose lease lapsed and a newer
+      // one could both save a full set of clips.
+      const owned = await tx.job.updateMany({
+        where: { id: job.id, lockedBy: holder, status: 'running' },
+        data: { status: 'succeeded', result: JSON.stringify({ clips: selected.length }), progress: 'Done', finishedAt: new Date(), leaseUntil: null, error: null },
+      });
+      if (owned.count === 0) return null;
       if (payload.replaceCandidates) await tx.clip.deleteMany({ where: { projectId: project.id, status: 'candidate', renderStatus: null } });
       const orientations = payload.config.orientations?.length ? payload.config.orientations : DEFAULT_ORIENTATIONS;
       const created: Clip[] = [];
@@ -437,7 +449,7 @@ export async function runAnalysisSlice(opts: { jobId?: string; projectId?: strin
       await tx.project.update({ where: { id: project.id }, data: { status: 'ready', stage: null, errorMessage: null } });
       return created;
     });
-    await finishJob(job.id, holder, { clips: clips.length });
+    if (!clips) return null;
 
     if (payload.autoQueue) {
       for (const clip of clips) {
